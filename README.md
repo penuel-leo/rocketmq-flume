@@ -48,7 +48,7 @@ Sink配置及启动说明：
         nohup flume-ng agent -c ./conf -f ./conf/exec-rocketmq.conf -n agent_log -Denable_ssl=true -Drocketmq.namesrv.domain=rocketmqNameSrv -Dlog.home=/flume-ng/logs -Dflume.root.logger=DEBUG,console &
 
 
-    需要拷贝到$FLUME_HOME/lib下的jar包含：
+   需要拷贝到$FLUME_HOME/lib下的jar包含：
         $PROJECT_HOME/rocketmq-flume-sink/target/rocketmq-flume-sink-1.0-SNAPSHOT.jar
         $PROJECT_HOME/rocketmq-flume-sink/target/dependency/fastjson-1.1.41.jar
         $PROJECT_HOME/rocketmq-flume-sink/target/dependency/netty-all-4.0.23.Final.jar
