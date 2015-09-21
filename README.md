@@ -15,9 +15,9 @@
 ===========================================================================================================
 ### Sink  配置及启动说明：
 #####config：
-        - namesrvAddr 指定RocketMQ的namesrvAddr，必填
         - topic 指定mq topic，必填
         - tags 指定mq tag名称，选填
+        - namesrvAddr 指定RocketMQ的namesrvAddr，选填，如果没指定，则jvm参数必须包含-Drocketmq.namesrv.domain=nsa,否则报错
         - allow 指定mq允许发送的过滤消息条件(正则表达式)，选填，不填则全部允许
         - deny 指定mq拒绝发送的过滤消息条件(正则表达式)，选填，不填则全部允许；
         - asyn 指定producer为同步发送还是异步发送，选填，默认true
