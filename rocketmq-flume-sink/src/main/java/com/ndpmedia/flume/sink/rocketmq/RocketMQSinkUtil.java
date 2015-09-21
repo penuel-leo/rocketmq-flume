@@ -24,6 +24,7 @@ public class RocketMQSinkUtil {
             producer.setNamesrvAddr(nameSrvAddr);
         }else{
             nameSrvAddr= System.getProperty("rocketmq.namesrv.domain", null);
+            //producer.setNamesrvAddr(nameSrvAddr);
         }
 
         System.out.println("----------nameSrvAddr is "+nameSrvAddr+" -----------");
