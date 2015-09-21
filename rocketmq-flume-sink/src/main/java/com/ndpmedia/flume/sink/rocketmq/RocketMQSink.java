@@ -1,10 +1,13 @@
 package com.ndpmedia.flume.sink.rocketmq;
 
+import com.alibaba.rocketmq.client.exception.MQBrokerException;
 import com.alibaba.rocketmq.client.exception.MQClientException;
 import com.alibaba.rocketmq.client.producer.MQProducer;
 import com.alibaba.rocketmq.client.producer.SendCallback;
 import com.alibaba.rocketmq.client.producer.SendResult;
+import com.alibaba.rocketmq.client.producer.SendStatus;
 import com.alibaba.rocketmq.common.message.Message;
+import com.alibaba.rocketmq.remoting.exception.RemotingException;
 import org.apache.flume.*;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.sink.AbstractSink;
@@ -78,11 +81,33 @@ public class RocketMQSink extends AbstractSink implements Configurable {
             }
 
             // 发送消息
-            if ( asyn ){
-                producer.send(new Message(topic, tag, event.getBody()), callback);
-            }else {
-                SendResult sendResult = producer.send(new Message(topic, tag, event.getBody()));
-                LOG.debug("sendResult->{}",sendResult);
+            final Message msg = new Message(topic, tag, event.getBody());
+            if ( asyn ) {
+                producer.send(msg, new SendCallback() {
+
+                    @Override public void onSuccess(SendResult sendResult) {
+                        LOG.debug("send success->" + sendResult.getMsgId());
+                    }
+
+                    @Override public void onException(Throwable e) {
+                        LOG.error("send exception->", e);
+                        SendResult result = null;
+                        try {
+                            result = producer.send(msg);//异步发送失败，会再同步发送一次
+                            if ( null == result || result.getSendStatus() != SendStatus.SEND_OK ) {
+                                LOG.warn("sync send msg fail:sendResult={}", result);
+                            }
+                        } catch ( Exception e1 ) {
+                            LOG.error("asyn send msg retry fail: sendResult=" + result, e);
+                        }
+                    }
+                });
+            } else {
+                SendResult sendResult = producer.send(msg); //默认失败会重试
+                LOG.debug("sendResult->{}", sendResult);
+                if ( null == sendResult || sendResult.getSendStatus() != SendStatus.SEND_OK ) {
+                    LOG.warn("sync send msg fail:sendResult={}", sendResult);
+                }
             }
             tx.commit();
             return Status.READY;
@@ -119,15 +144,4 @@ public class RocketMQSink extends AbstractSink implements Configurable {
         LOG.warn("RocketMQSink stop producer... ");
     }
 
-    SendCallback callback = new SendCallback() {
-
-        @Override public void onSuccess(SendResult sendResult) {
-            LOG.debug("send success->" + sendResult.getMsgId());
-        }
-
-        @Override public void onException(Throwable e) {
-            LOG.error("send exception->", e);
-
-        }
-    };
 }

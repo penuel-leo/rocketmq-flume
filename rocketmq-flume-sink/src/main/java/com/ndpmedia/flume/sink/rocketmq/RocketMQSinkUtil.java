@@ -15,12 +15,19 @@ public class RocketMQSinkUtil {
 
     public static MQProducer getProducerInstance(Context context) {
         final String producerGroup = context.getString(RocketMQSinkConstant.PRODUCER_GROUP, RocketMQSinkConstant.DEFAULT_PRODUCER_GROUP);
-
-        final String nameSrvAddr = context.getString(RocketMQSinkConstant.NAMESRVADDR);
-        checkNotNullNorEmpty("nameSrvAddr",nameSrvAddr);
+        System.out.println("----------producerGroup is "+producerGroup+" -----------");
 
         DefaultMQProducer producer = new DefaultMQProducer(producerGroup);
-        producer.setNamesrvAddr(nameSrvAddr);
+
+        String nameSrvAddr = context.getString(RocketMQSinkConstant.NAMESRVADDR);
+        if ( null != nameSrvAddr && nameSrvAddr.trim().length() > 0 ){
+            producer.setNamesrvAddr(nameSrvAddr);
+        }else{
+            nameSrvAddr= System.getProperty("rocketmq.namesrv.domain", null);
+        }
+
+        System.out.println("----------nameSrvAddr is "+nameSrvAddr+" -----------");
+        checkNotNullNorEmpty("nameSrvAddr",nameSrvAddr);
 
         return producer;
     }
