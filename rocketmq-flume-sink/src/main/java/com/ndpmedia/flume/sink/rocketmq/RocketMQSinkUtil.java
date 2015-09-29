@@ -21,15 +21,18 @@ public class RocketMQSinkUtil {
 
         String nameSrvAddr = context.getString(RocketMQSinkConstant.NAMESRVADDR);
         if ( null != nameSrvAddr && nameSrvAddr.trim().length() > 0 ){
+            checkNotNullNorEmpty("nameSrvAddr",nameSrvAddr);
             producer.setNamesrvAddr(nameSrvAddr);
         }else{
             nameSrvAddr= System.getProperty("rocketmq.namesrv.domain", null);
-            //producer.setNamesrvAddr(nameSrvAddr);
+            if ( nameSrvAddr == null || nameSrvAddr.trim().length() == 0 ){
+                nameSrvAddr = "auto fetch"; //这里是因为我厂更改了RocketMQ的namesrv获取方式而自定义的，可忽略
+            }else{
+                producer.setNamesrvAddr(nameSrvAddr);//from jvm
+            }
         }
 
         System.out.println("----------nameSrvAddr is "+nameSrvAddr+" -----------");
-        checkNotNullNorEmpty("nameSrvAddr",nameSrvAddr);
-
         return producer;
     }
 
