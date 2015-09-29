@@ -1,13 +1,11 @@
 package com.ndpmedia.flume.sink.rocketmq;
 
-import com.alibaba.rocketmq.client.exception.MQBrokerException;
 import com.alibaba.rocketmq.client.exception.MQClientException;
 import com.alibaba.rocketmq.client.producer.MQProducer;
 import com.alibaba.rocketmq.client.producer.SendCallback;
 import com.alibaba.rocketmq.client.producer.SendResult;
 import com.alibaba.rocketmq.client.producer.SendStatus;
 import com.alibaba.rocketmq.common.message.Message;
-import com.alibaba.rocketmq.remoting.exception.RemotingException;
 import org.apache.flume.*;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.sink.AbstractSink;

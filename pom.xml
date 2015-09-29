@@ -20,15 +20,19 @@
 
     <repositories>
         <repository>
-            <id>Local Nexus Repository</id>
-            <url>http://172.30.10.200:8081/nexus/content/repositories/releases/</url>
+            <id>Local Nexus Repository Releases</id>
+            <url>http://172.30.10.160:8081/nexus/content/repositories/releases/</url>
+        </repository>
+        <repository>
+            <id>Local Nexus Repository Snapshots</id>
+            <url>http://172.30.10.160:8081/nexus/content/repositories/snapshots/</url>
         </repository>
     </repositories>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <flume.version>1.6.0</flume.version>
-        <rocketmq.version>3.2.2.R2</rocketmq.version>
+        <rocketmq.version>3.2.2.R2-SNAPSHOT</rocketmq.version>
         <junit.version>4.11</junit.version>
         <mockito.version>1.9.0</mockito.version>
     </properties>
