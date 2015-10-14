@@ -27,8 +27,10 @@ public class RocketMQSinkUtil {
             nameSrvAddr= System.getProperty("rocketmq.namesrv.domain", null);
             if ( nameSrvAddr == null || nameSrvAddr.trim().length() == 0 ){
                 nameSrvAddr = "auto fetch"; //这里是因为我厂更改了RocketMQ的namesrv获取方式而自定义的，可忽略
-            }else{
+            }else if(nameSrvAddr.contains(":")){//包含port的话，就设置producer的nameSrvAddr
                 producer.setNamesrvAddr(nameSrvAddr);//from jvm
+            }else{//这里是因为我厂更改了RocketMQ的namesrv获取方式而自定义的，可忽略
+                System.out.println("------------nameSrvAddr is "+nameSrvAddr+" and not set producer.namesrvAddr---------------");
             }
         }
 
