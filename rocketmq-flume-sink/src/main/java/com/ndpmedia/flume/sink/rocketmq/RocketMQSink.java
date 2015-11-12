@@ -100,7 +100,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                 producer.send(msg, new SendCallback() {
 
                     @Override public void onSuccess(SendResult sendResult) {
-                        LOG.debug("send success->" + sendResult.getMsgId());
+                        LOG.debug("send success msg:{},result:{}",msg,sendResult);
                     }
 
                     @Override public void onException(Throwable e) {
