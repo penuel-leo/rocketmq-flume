@@ -19,6 +19,7 @@ public class RocketMQSinkConstant {
     public static final String DENY = "deny";
     public static final String ASYN = "asyn";
     public static final String NAMESRVADDR = "namesrvAddr";
+    public static final String EXTRA = "extra";
 
     /* defalut */
     public static final String DEFAULT_TOPIC = "T_ROCKETMQ_FLUME";

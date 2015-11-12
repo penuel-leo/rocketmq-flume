@@ -21,6 +21,9 @@
         - allow 指定mq允许发送的过滤消息条件(正则表达式)，选填，不填则全部允许
         - deny 指定mq拒绝发送的过滤消息条件(正则表达式)，选填，不填则全部允许；
         - asyn 指定producer为同步发送还是异步发送，选填，默认true
+        - extra 非必需，可以指定一个extra字段，放入msg的properties中，后续进行处理
+#####other:
+        - flume自带的source interceptor内容，都会默认放到RocketMQ.Message的properties中
 #####config demo:
         agent_log.sources = src_exec
         agent_log.sinks = sink_rocketmq
@@ -37,6 +40,7 @@
         agent_log.sinks.sink_rocketmq.producerGroup = PG_FLUME_NGINX
         agent_log.sinks.sink_rocketmq.allow = ^.*$
         agent_log.sinks.sink_rocketmq.asyn = true
+        agent_log.sinks.sink_rocketmq.extra = aabbcc
         # Use a channel which buffers events in memory
         agent_log.channels.ch_mem.type = memory
         agent_log.channels.ch_mem.capacity = 50

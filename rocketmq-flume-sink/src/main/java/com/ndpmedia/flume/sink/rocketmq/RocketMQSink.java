@@ -1,5 +1,6 @@
 package com.ndpmedia.flume.sink.rocketmq;
 
+import com.alibaba.fastjson.JSONObject;
 import com.alibaba.rocketmq.client.exception.MQClientException;
 import com.alibaba.rocketmq.client.producer.MQProducer;
 import com.alibaba.rocketmq.client.producer.SendCallback;
@@ -11,6 +12,8 @@ import org.apache.flume.conf.Configurable;
 import org.apache.flume.sink.AbstractSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Map;
 
 /**
  * RocketMQSink Created with rocketmq-flume.
@@ -33,6 +36,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
     private String deny;
 
+    private String extra;
+
     private boolean asyn = true;//是否异步发送
 
     @Override public void configure(Context context) {
@@ -44,6 +49,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
         allow = context.getString(RocketMQSinkConstant.ALLOW, null);
         deny = context.getString(RocketMQSinkConstant.DENY, null);
+        extra = context.getString(RocketMQSinkConstant.EXTRA,null);
 
         asyn = context.getBoolean(RocketMQSinkConstant.ASYN, true);
 
@@ -79,7 +85,17 @@ public class RocketMQSink extends AbstractSink implements Configurable {
             }
 
             // 发送消息
+
             final Message msg = new Message(topic, tag, event.getBody());
+            if (null != event.getHeaders() && event.getHeaders().size() > 0 ){
+                for ( Map.Entry<String,String> entry : event.getHeaders().entrySet() ){
+                    msg.putUserProperty(entry.getKey(),entry.getValue());
+                }
+            }
+            if ( null != extra && extra.length() > 0 ){
+                msg.putUserProperty("extra",extra);
+            }
+
             if ( asyn ) {
                 producer.send(msg, new SendCallback() {
 
