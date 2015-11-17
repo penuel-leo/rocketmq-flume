@@ -1,6 +1,5 @@
 package com.ndpmedia.flume.sink.rocketmq;
 
-import com.alibaba.fastjson.JSONObject;
 import com.alibaba.rocketmq.client.exception.MQClientException;
 import com.alibaba.rocketmq.client.producer.MQProducer;
 import com.alibaba.rocketmq.client.producer.SendCallback;
@@ -52,6 +51,10 @@ public class RocketMQSink extends AbstractSink implements Configurable {
         extra = context.getString(RocketMQSinkConstant.EXTRA,null);
 
         asyn = context.getBoolean(RocketMQSinkConstant.ASYN, true);
+
+        if ( LOG.isInfoEnabled() ) {
+            LOG.info("RocketMQSource configure success, topic={},tag={},allow={},deny={},extra={}, asyn={}", topic, tag, allow, deny, extra, asyn);
+        }
 
     }
 
@@ -156,14 +159,6 @@ public class RocketMQSink extends AbstractSink implements Configurable {
         producer.shutdown();
         super.stop();
         LOG.warn("RocketMQSink stop producer... ");
-    }
-
-    public static void main(String[] args) {
-        String regex = "^.*/trace.*|.*/conv.*$";
-        String msg = "0.002-_-181.58.80.174-_-global.ymtracking.com-_-10.5.10.11:8080-_-302-_-28/Sep/2015:09:13:19 +0000-_-GET " +
-                "/conv?offer_id=105495&aff_id=101581&aff_sub=518534_1 HTTP/1.1-_-302-_-278-_---_-Mozilla/5.0 (Linux; U; Android 4.3.3; es-es; M6 Build/JDQ39)" +
-                " AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30-_---_-0.002";
-        System.out.println(msg.matches(regex));
     }
 
 }
