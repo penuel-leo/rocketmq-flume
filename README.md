@@ -24,7 +24,7 @@
         - rocketmq msg中的properties内容，都会默认放到Flume Event的headers中，另外topic,tag,extra字段也在headers中
 #####config demo:
         agent_log.sources = source_rocketmq
-        # Descrie the sink
+        # Descrie the source
         agent_log.sources.source_rocketmq.type = com.ndpmedia.flume.source.rocketmq.RocketMQSource
         agent_log.sources.source_rocketmq.namesrvAddr = 172.30.30.125:9876
         agent_log.sources.source_rocketmq.topic = T_FLUME_NGINX
@@ -35,10 +35,9 @@
         agent_log.sources.source_rocketmq.consumeFromWhere = CONSUME_FROM_LAST_OFFSET
         agent_log.sources.source_rocketmq.extra = aabbcc
         # Bind the source and sink to the channel
-        agent_log.sinks.sink_rocketmq.channel = ch_mem
+        agent_log.sources.source_rocketmq.channel = ch_mem
 #####启动命令：
-        nohup flume-ng agent -c ./conf -f ./conf/rocketmq-fileroll.conf -n agent_log -Denable_ssl=true -Drocketmq.namesrv.domain=rocketmqNameSrv -Dlog
-        .home=/flume-ng/logs -Dflume.root.logger=DEBUG,console &
+        nohup flume-ng agent -c ./conf -f ./conf/rocketmq-fileroll.conf -n agent_log -Denable_ssl=true -Drocketmq.namesrv.domain=rocketmqNameSrv -Dlog.home=/flume-ng/logs -Dflume.root.logger=DEBUG,console &
 
 
 ===========================================================================================================
