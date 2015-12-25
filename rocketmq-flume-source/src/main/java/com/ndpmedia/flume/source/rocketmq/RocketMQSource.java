@@ -54,6 +54,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private AtomicReference<List<Event>> events = new AtomicReference<List<Event>>();
 
+
     @Override public void configure(Context context) {
         topic = context.getString(RocketMQSourceConstant.TOPIC, RocketMQSourceConstant.DEFAULT_TOPIC);
         tag = context.getString(RocketMQSourceConstant.TAG, RocketMQSourceConstant.DEFAULT_TAG);
@@ -63,6 +64,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         maxDelay = context.getLong(RocketMQSourceConstant.MAX_DELAY, 2000L);
         String messageModel = context.getString(RocketMQSourceConstant.MESSAGE_MODEL, RocketMQSourceConstant.DEFAULT_MESSAGE_MODEL);
         String fromWhere = context.getString(RocketMQSourceConstant.CONSUME_FROM_WHERE, RocketMQSourceConstant.DEFAULT_CONSUME_FROM_WHERE);
+
         messageListener = new CustomMessageListenerConcurrently();
         consumer = RocketMQSourceUtil.getConsumerInstance(context);
 
@@ -115,10 +117,14 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     class CustomMessageListenerConcurrently implements MessageListenerConcurrently {
 
-        @Override public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> messageExts, ConsumeConcurrentlyContext consumeConcurrentlyContext) {
+        @Override public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> messageExts,
+                                                                  ConsumeConcurrentlyContext ctx) {
             if ( null == messageExts || messageExts.size() == 0 ) {
-                return null;
+                LOG.error("consumeMessage() has null or empty list passed in");
+                return ConsumeConcurrentlyStatus.RECONSUME_LATER;
             }
+
+            int ackIndex = 0;
             for ( MessageExt messageExt : messageExts ) {
                 Event event = new SimpleEvent();
                 Map<String, String> headers = new HashMap<String, String>();
@@ -129,6 +135,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                 event.setHeaders(headers);
                 event.setBody(messageExt.getBody());
                 events.get().add(event);
+                ctx.setAckIndex(++ackIndex);
             }
             return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
         }
