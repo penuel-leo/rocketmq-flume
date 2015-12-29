@@ -116,15 +116,15 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             boolean needToSwitch = false;
             for (MessageQueue messageQueue : messageQueues) {
                 long offset = consumer.fetchConsumeOffset(messageQueue, false);
-                if (offset == -1) {
+                if (offset < 0) {
                     offset = 0;
                 }
                  do {
-                    PullResult pullResult = consumer.pull(messageQueue, tag, offset + 1, pullBatchSize);
+                    PullResult pullResult = consumer.pull(messageQueue, tag, offset, pullBatchSize);
                     needToSwitch = !handlePullResult(pullResult, events);
                     if (!needToSwitch) {
                         getChannelProcessor().processEventBatch(events);
-                        consumer.updateConsumeOffset(messageQueue, pullResult.getNextBeginOffset() - 1);
+                        consumer.updateConsumeOffset(messageQueue, pullResult.getNextBeginOffset());
                         events.clear();
 
                         // Update next offset.
@@ -136,14 +136,13 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             // Randomly choose one message queue and start to long pulling.
             MessageQueue messageQueue = messageQueues.iterator().next();
             long offset = consumer.fetchConsumeOffset(messageQueue, false);
-            if (offset == -1) {
+            if (offset < 0) {
                 offset = 0;
             }
-
-            PullResult pullResult = consumer.pullBlockIfNotFound(messageQueue, tag, offset + 1, pullBatchSize);
+            PullResult pullResult = consumer.pullBlockIfNotFound(messageQueue, tag, offset, pullBatchSize);
             if (handlePullResult(pullResult, events)) {
                 getChannelProcessor().processEventBatch(events);
-                consumer.updateConsumeOffset(messageQueue, pullResult.getNextBeginOffset() - 1);
+                consumer.updateConsumeOffset(messageQueue, pullResult.getNextBeginOffset());
             }
         }
     }
