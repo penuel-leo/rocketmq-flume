@@ -52,6 +52,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private long lastProcessTime = 0L;//上一次处理时间
 
+    private RocketMQSourceCounter counter;
+
     private AtomicReference<List<Event>> events = new AtomicReference<List<Event>>();
 
 
@@ -67,6 +69,10 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         messageListener = new CustomMessageListenerConcurrently();
         consumer = RocketMQSourceUtil.getConsumerInstance(context);
+
+        if ( null == counter ){
+            counter = new RocketMQSourceCounter(getName());
+        }
 
         while ( !events.compareAndSet(null, new ArrayList<Event>()) ) {}
 
@@ -88,7 +94,16 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             }
             long currentTime = System.currentTimeMillis();
             while ( events.get().size() >= maxSize || (currentTime - lastProcessTime >= maxDelay && events.get().size() > 0) ) {
+                long receivedTime = System.currentTimeMillis();
+                counter.addToEventReceivedCount(events.get().size());
+                counter.addToEventReceivedTimer((receivedTime-currentTime)/1000);
+
                 getChannelProcessor().processEventBatch(events.getAndSet(new ArrayList<Event>()));
+
+                long acceptedTime = System.currentTimeMillis();
+                counter.addToEventAcceptedCount(events.get().size());
+                counter.addToEventAcceptedTimer((acceptedTime-receivedTime)/1000);
+
                 lastProcessTime = currentTime;
             }
         } catch ( Exception e ) {
@@ -102,6 +117,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         try {
             LOG.warn("RocketMQSource start consumer... ");
             consumer.start();
+            counter.start();
         } catch ( MQClientException e ) {
             LOG.error("RocketMQSource start consumer failed", e);
         }
@@ -111,8 +127,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     @Override public synchronized void stop() {
         // 停止Producer
         consumer.shutdown();
-        super.stop();
-        LOG.warn("RocketMQSource stop consumer... ");
+        counter.stop();
+        LOG.warn("RocketMQSource stop consumer {}, Metrics:{} ", getName(), counter);
     }
 
     class CustomMessageListenerConcurrently implements MessageListenerConcurrently {
