@@ -66,6 +66,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         switch (pullResult.getPullStatus()) {
             case FOUND:
                 List<MessageExt> messages = pullResult.getMsgFoundList();
+                LOG.debug("Pulled {} messages", messages.size());
                 for (MessageExt messageExt : messages) {
                     // filter by tag.
                     if (null != tag && !tag.trim().equals("*")) {
