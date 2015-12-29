@@ -163,7 +163,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             LOG.warn("RocketMQSource start consumer... ");
             consumer.start();
             consumer.registerMessageQueueListener(topic, new DefaultMessageQueueListener());
-            consumer.fetchSubscribeMessageQueues(topic);
+            Set<MessageQueue> messageQueueSet = consumer.fetchSubscribeMessageQueues(topic);
+            messageQueues.set(messageQueueSet);
         } catch ( MQClientException e ) {
             LOG.error("RocketMQSource start consumer failed", e);
         }
