@@ -24,8 +24,8 @@ public class RocketMQSourceConstant {
 
 
     /* default */
-    public static final String DEFAULT_TOPIC = "T_ROCKETMQ_FLUME";
-    public static final String DEFAULT_CONSUMER_GROUP = "CG_ROCKETMQ_FLUME";
+    public static final String DEFAULT_TOPIC = "T_QuickStart";
+    public static final String DEFAULT_CONSUMER_GROUP = "CG_QuickStart";
     public static final String DEFAULT_TAG = "*";
     public static final String DEFAULT_MESSAGE_MODEL = "CLUSTERING";
     public static final String DEFAULT_CONSUME_FROM_WHERE = "CONSUME_FROM_LAST_OFFSET";
