@@ -20,11 +20,11 @@
 
     <repositories>
         <repository>
-            <id>Local Nexus Repository Releases</id>
+            <id>nexus-release</id>
             <url>http://172.30.10.160:8081/nexus/content/repositories/releases/</url>
         </repository>
         <repository>
-            <id>Local Nexus Repository Snapshots</id>
+            <id>nexus-snapshot</id>
             <url>http://172.30.10.160:8081/nexus/content/repositories/snapshots/</url>
         </repository>
     </repositories>
