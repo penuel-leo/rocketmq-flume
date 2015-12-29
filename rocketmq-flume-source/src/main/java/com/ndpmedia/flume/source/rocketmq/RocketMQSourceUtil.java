@@ -1,6 +1,10 @@
 package com.ndpmedia.flume.source.rocketmq;
 
 import com.alibaba.rocketmq.client.consumer.*;
+import com.alibaba.rocketmq.client.consumer.rebalance.AllocateMessageQueueByDataCenter;
+import com.alibaba.rocketmq.client.consumer.store.RemoteBrokerOffsetStore;
+import com.alibaba.rocketmq.client.impl.MQClientManager;
+import com.alibaba.rocketmq.client.impl.factory.MQClientInstance;
 import com.alibaba.rocketmq.common.UtilAll;
 import com.alibaba.rocketmq.common.consumer.ConsumeFromWhere;
 import com.alibaba.rocketmq.common.protocol.heartbeat.MessageModel;
@@ -15,11 +19,11 @@ import org.apache.flume.Context;
  */
 public class RocketMQSourceUtil {
 
-    public static MQPushConsumer getConsumerInstance(Context context) {
+    public static MQPullConsumer getConsumerInstance(Context context) {
         final String consumerGroup = context.getString(RocketMQSourceConstant.CONSUMER_GROUP, RocketMQSourceConstant.DEFAULT_CONSUMER_GROUP);
         System.out.println("----------consumerGroup is " + consumerGroup + " -----------");
 
-        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer(consumerGroup);
+        DefaultMQPullConsumer consumer = new DefaultMQPullConsumer(consumerGroup);
 
         String nameSrvAddr = context.getString(RocketMQSourceConstant.NAMESRVADDR);
         if ( null != nameSrvAddr && nameSrvAddr.trim().length() > 0 ) {
@@ -35,38 +39,13 @@ public class RocketMQSourceUtil {
             }
         }
         consumer.setMessageModel(MessageModel.valueOf(context.getString(RocketMQSourceConstant.MESSAGE_MODEL, RocketMQSourceConstant.DEFAULT_MESSAGE_MODEL)));
-        ConsumeFromWhere consumeFromWhere = ConsumeFromWhere.valueOf(context.getString(RocketMQSourceConstant.CONSUME_FROM_WHERE,
-                                                                                       RocketMQSourceConstant.DEFAULT_CONSUME_FROM_WHERE));
-        consumer.setConsumeFromWhere(consumeFromWhere);
-        if ( consumeFromWhere == ConsumeFromWhere.CONSUME_FROM_TIMESTAMP ) {
-            String consumeTimeStamp = context.getString(RocketMQSourceConstant.CONSUME_TIMESTAMP);
-            if ( consumeTimeStamp != null && consumeTimeStamp.length() > 0 ) {
+        MQClientInstance clientInstance = MQClientManager.getInstance().getAndCreateMQClientInstance(consumer, null);
+        consumer.setOffsetStore(new RemoteBrokerOffsetStore(clientInstance, consumerGroup));
 
-                // Validate timestamp format.
-                if (null == UtilAll.parseDate(consumeTimeStamp, UtilAll.yyyyMMddHHmmss)) {
-                   throw new RuntimeException("Illegal time format");
-                }
+        // TODO make consume from where configurable.
+        consumer.setAllocateMessageQueueStrategy(new AllocateMessageQueueByDataCenter(clientInstance));
 
-                consumer.setConsumeTimestamp(consumeTimeStamp);
-            }
-        }
-
-        int pullBatchSize = context.getInteger(RocketMQSourceConstant.PULL_BATCH_SIZE,
-                RocketMQSourceConstant.DEFAULT_PULL_BATCH_SIZE);
-        consumer.setPullBatchSize(pullBatchSize);
-
-        int consumeBatchSize = context.getInteger(RocketMQSourceConstant.CONSUME_BATCH_SIZE,
-                RocketMQSourceConstant.DEFAULT_CONSUME_BATCH_SIZE);
-        consumer.setConsumeMessageBatchMaxSize(consumeBatchSize);
-
-        int corePoolSize = context.getInteger(RocketMQSourceConstant.CORE_POOL_SIZE,
-                RocketMQSourceConstant.DEFAULT_CORE_POOL_SIZE);
-        consumer.setConsumeThreadMin(corePoolSize);
-
-        int maxPoolSize = context.getInteger(RocketMQSourceConstant.MAX_POOL_SIZE,
-                RocketMQSourceConstant.DEFAULT_MAX_POOL_SIZE);
-        consumer.setConsumeThreadMax(maxPoolSize);
-
+        consumer.setMessageModel(MessageModel.CLUSTERING);
         System.out.println("----------nameSrvAddr is " + nameSrvAddr + " -----------");
         return consumer;
     }

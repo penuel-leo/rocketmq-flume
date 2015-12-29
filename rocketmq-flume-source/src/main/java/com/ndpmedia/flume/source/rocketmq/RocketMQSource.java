@@ -1,12 +1,16 @@
 package com.ndpmedia.flume.source.rocketmq;
 
-import com.alibaba.rocketmq.client.consumer.MQPushConsumer;
+import com.alibaba.rocketmq.client.consumer.*;
 import com.alibaba.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
 import com.alibaba.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
 import com.alibaba.rocketmq.client.consumer.listener.MessageListener;
 import com.alibaba.rocketmq.client.consumer.listener.MessageListenerConcurrently;
+import com.alibaba.rocketmq.client.exception.MQBrokerException;
 import com.alibaba.rocketmq.client.exception.MQClientException;
 import com.alibaba.rocketmq.common.message.MessageExt;
+import com.alibaba.rocketmq.common.message.MessageQueue;
+import com.alibaba.rocketmq.remoting.exception.RemotingException;
+import com.google.common.base.Preconditions;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.EventDeliveryException;
@@ -17,10 +21,7 @@ import org.apache.flume.source.AbstractSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -38,58 +39,117 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private String tag;
 
-    private MQPushConsumer consumer;
-
-    private MessageListener messageListener;
+    private MQPullConsumer consumer;
 
     private String extra;
 
-    private int maxSize;//列表缓存最多的消息个数，大于maxSize则prcess event
+    private AtomicReference<Set<MessageQueue>> messageQueues = new AtomicReference<Set<MessageQueue>>();
 
-    private long maxDelay;//消息缓存最长延迟时间，如果小于maxSize，但是大于maxDelay会立即发送所有消息
-
-    private boolean asyn = false;//是否异步消费
-
-    private long lastProcessTime = 0L;//上一次处理时间
-
-    private AtomicReference<List<Event>> events = new AtomicReference<List<Event>>();
+    private int pullBatchSize;
 
 
     @Override public void configure(Context context) {
         topic = context.getString(RocketMQSourceConstant.TOPIC, RocketMQSourceConstant.DEFAULT_TOPIC);
         tag = context.getString(RocketMQSourceConstant.TAG, RocketMQSourceConstant.DEFAULT_TAG);
         extra = context.getString(RocketMQSourceConstant.EXTRA, null);
-        asyn = context.getBoolean(RocketMQSourceConstant.ASYN, false);
-        maxSize = context.getInteger(RocketMQSourceConstant.MAX_SIZE, 20);
-        maxDelay = context.getLong(RocketMQSourceConstant.MAX_DELAY, 2000L);
         String messageModel = context.getString(RocketMQSourceConstant.MESSAGE_MODEL, RocketMQSourceConstant.DEFAULT_MESSAGE_MODEL);
         String fromWhere = context.getString(RocketMQSourceConstant.CONSUME_FROM_WHERE, RocketMQSourceConstant.DEFAULT_CONSUME_FROM_WHERE);
-
-        messageListener = new CustomMessageListenerConcurrently();
+        pullBatchSize = context.getInteger(RocketMQSourceConstant.PULL_BATCH_SIZE, RocketMQSourceConstant.DEFAULT_PULL_BATCH_SIZE);
         consumer = RocketMQSourceUtil.getConsumerInstance(context);
 
-        while ( !events.compareAndSet(null, new ArrayList<Event>()) ) {}
+    }
 
-        try {
-            consumer.subscribe(topic, tag);
-            consumer.registerMessageListener(messageListener);
-            if ( LOG.isInfoEnabled() ) {
-                LOG.info("RocketMQSource configure success, topic={},tag={},messageModel={},fromWhere={},extra={}", topic, tag, messageModel, fromWhere, extra);
+    private boolean handlePullResult(PullResult pullResult, List<Event> events) {
+        Preconditions.checkNotNull(events);
+        Preconditions.checkNotNull(pullResult);
+
+        switch (pullResult.getPullStatus()) {
+            case FOUND:
+                List<MessageExt> messages = pullResult.getMsgFoundList();
+                for (MessageExt messageExt : messages) {
+                    // filter by tag.
+                    if (null != tag && !tag.trim().equals("*")) {
+                        if (!tag.trim().equals(messageExt.getTags())) {
+                            continue;
+                        }
+                    }
+                    Event event = new SimpleEvent();
+                    Map<String, String> headers = new HashMap<String, String>();
+                    headers.put(RocketMQSourceConstant.TOPIC, topic);
+                    headers.put(RocketMQSourceConstant.TAG, tag);
+                    headers.put(RocketMQSourceConstant.EXTRA, extra);
+                    headers.putAll(messageExt.getProperties());
+                    event.setHeaders(headers);
+                    event.setBody(messageExt.getBody());
+                    events.add(event);
+                }
+                return true;
+
+            case NO_MATCHED_MSG:
+                // fall through on purpose.
+            case NO_NEW_MSG:
+                break;
+
+            case SLAVE_LAG_BEHIND:
+                LOG.warn("The master broker is down!!");
+                break;
+
+            case SUBSCRIPTION_NOT_LATEST:
+                LOG.warn("Subscription is the latest");
+                break;
+
+            case OFFSET_ILLEGAL:
+                LOG.error("Illegal offset!!");
+                break;
+
+            default:
+                break;
+        }
+
+        return false;
+    }
+
+    private void process0(Set<MessageQueue> messageQueues, boolean useLongPull, List<Event> events)
+            throws MQClientException, RemotingException, InterruptedException, MQBrokerException {
+        if (!useLongPull) {
+            boolean needToSwitch = false;
+            for (MessageQueue messageQueue : messageQueues) {
+                long offset = consumer.fetchConsumeOffset(messageQueue, false);
+                 do {
+                    PullResult pullResult = consumer.pull(messageQueue, tag, offset + 1, pullBatchSize);
+                    needToSwitch = !handlePullResult(pullResult, events);
+                    if (!needToSwitch) {
+                        getChannelProcessor().processEventBatch(events);
+                        consumer.updateConsumeOffset(messageQueue, pullResult.getNextBeginOffset() - 1);
+                        events.clear();
+
+                        // Update next offset.
+                        offset = pullResult.getNextBeginOffset();
+                    }
+                } while (!needToSwitch);
             }
-        } catch ( MQClientException e ) {
-            LOG.error("RocketMQSource configure fail", e);
+        } else {
+            // Randomly choose one message queue and start to long pulling.
+            MessageQueue messageQueue = messageQueues.iterator().next();
+            long offset = consumer.fetchConsumeOffset(messageQueue, false);
+            PullResult pullResult = consumer.pullBlockIfNotFound(messageQueue, tag, offset + 1, pullBatchSize);
+            if (handlePullResult(pullResult, events)) {
+                getChannelProcessor().processEventBatch(events);
+                consumer.updateConsumeOffset(messageQueue, pullResult.getNextBeginOffset() - 1);
+            }
         }
     }
 
     @Override public Status process() throws EventDeliveryException {
         try {
-            if ( asyn ) {
-                //TODO new thread process LinkedBlockingQueue
-            }
-            long currentTime = System.currentTimeMillis();
-            while ( events.get().size() >= maxSize || (currentTime - lastProcessTime >= maxDelay && events.get().size() > 0) ) {
-                getChannelProcessor().processEventBatch(events.getAndSet(new ArrayList<Event>()));
-                lastProcessTime = currentTime;
+            Set<MessageQueue> messageQueueSet = messageQueues.get();
+            if (null == messageQueueSet || messageQueueSet.isEmpty()) {
+                LOG.warn("Message queues allocated to this client are currently empty");
+                return Status.BACKOFF;
+            } else {
+                List<Event> events = new ArrayList<Event>();
+                process0(messageQueueSet, false, events);
+                process0(messageQueueSet, true, events);
             }
         } catch ( Exception e ) {
             LOG.error("RocketMQSource process error", e);
@@ -102,6 +162,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         try {
             LOG.warn("RocketMQSource start consumer... ");
             consumer.start();
+            consumer.registerMessageQueueListener(topic, new DefaultMessageQueueListener());
+            consumer.fetchSubscribeMessageQueues(topic);
         } catch ( MQClientException e ) {
             LOG.error("RocketMQSource start consumer failed", e);
         }
@@ -115,29 +177,10 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         LOG.warn("RocketMQSource stop consumer... ");
     }
 
-    class CustomMessageListenerConcurrently implements MessageListenerConcurrently {
-
-        @Override public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> messageExts,
-                                                                  ConsumeConcurrentlyContext ctx) {
-            if ( null == messageExts || messageExts.size() == 0 ) {
-                LOG.error("consumeMessage() has null or empty list passed in");
-                return ConsumeConcurrentlyStatus.RECONSUME_LATER;
-            }
-
-            int ackIndex = 0;
-            for ( MessageExt messageExt : messageExts ) {
-                Event event = new SimpleEvent();
-                Map<String, String> headers = new HashMap<String, String>();
-                headers.put(RocketMQSourceConstant.TOPIC, topic);
-                headers.put(RocketMQSourceConstant.TAG, tag);
-                headers.put(RocketMQSourceConstant.EXTRA, extra);
-                headers.putAll(messageExt.getProperties());
-                event.setHeaders(headers);
-                event.setBody(messageExt.getBody());
-                events.get().add(event);
-                ctx.setAckIndex(++ackIndex);
-            }
-            return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
+    class DefaultMessageQueueListener implements MessageQueueListener {
+        @Override
+        public void messageQueueChanged(String topic, Set<MessageQueue> mqAll, Set<MessageQueue> mqDivided) {
+            messageQueues.getAndSet(mqDivided);
         }
     }
 }
