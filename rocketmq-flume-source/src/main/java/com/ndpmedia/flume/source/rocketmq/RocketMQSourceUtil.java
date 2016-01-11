@@ -41,7 +41,6 @@ public class RocketMQSourceUtil {
         consumer.setMessageModel(MessageModel.valueOf(context.getString(RocketMQSourceConstant.MESSAGE_MODEL, RocketMQSourceConstant.DEFAULT_MESSAGE_MODEL)));
         consumer.changeInstanceNameToPID();
         MQClientInstance clientInstance = MQClientManager.getInstance().getAndCreateMQClientInstance(consumer, null);
-        consumer.setOffsetStore(new RemoteBrokerOffsetStore(clientInstance, consumerGroup));
         // TODO make consume from where configurable.
         consumer.setAllocateMessageQueueStrategy(new AllocateMessageQueueByDataCenter(clientInstance));
 

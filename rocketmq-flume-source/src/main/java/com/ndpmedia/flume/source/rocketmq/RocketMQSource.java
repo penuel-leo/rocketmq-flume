@@ -117,21 +117,17 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     private void process0(Set<MessageQueue> messageQueues, boolean useLongPull, List<Event> events)
             throws MQClientException, RemotingException, InterruptedException, MQBrokerException {
         if ( !useLongPull ) {
-            boolean needToSwitch = false;
             for ( MessageQueue messageQueue : messageQueues ) {
                 long offset = consumer.fetchConsumeOffset(messageQueue, false);
                 if ( offset < 0 ) {
                     offset = 0;
                 }
-                long startTime = System.currentTimeMillis();
+                boolean needToSwitch;
                 do {
                     PullResult pullResult = consumer.pull(messageQueue, tag, offset, pullBatchSize);
                     needToSwitch = !handlePullResult(pullResult, events);
                     if ( !needToSwitch ) {
-                        getChannelProcessor().processEventBatch(events);
-                        consumer.updateConsumeOffset(messageQueue, pullResult.getNextBeginOffset());
-                        events.clear();
-
+                        processEvent(events, messageQueue, pullResult.getNextBeginOffset());
                         // Update next offset.
                         offset = pullResult.getNextBeginOffset();
                     }
@@ -146,7 +142,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             }
             PullResult pullResult = consumer.pullBlockIfNotFound(messageQueue, tag, offset, pullBatchSize);
             if ( handlePullResult(pullResult, events) ) {
-                processEvent(events,messageQueue, offset);
+                processEvent(events, messageQueue, offset);
             }
         }
     }
@@ -158,6 +154,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         getChannelProcessor().processEventBatch(events);
         consumer.updateConsumeOffset(messageQueue, offset);
+        events.clear();
 
         long acceptedTime = System.currentTimeMillis();
         counter.addToEventAcceptedCount(events.size());
