@@ -15,6 +15,7 @@ import org.apache.flume.EventDeliveryException;
 import org.apache.flume.PollableSource;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.event.SimpleEvent;
+import org.apache.flume.instrumentation.SourceCounter;
 import org.apache.flume.source.AbstractSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,11 +44,9 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private AtomicReference<Set<MessageQueue>> messageQueues = new AtomicReference<Set<MessageQueue>>();
 
-    private RocketMQSourceCounter counter;
+    private SourceCounter counter;
 
     private int pullBatchSize;
-
-    private long startTime;
 
     @Override public void configure(Context context) {
         topic = context.getString(RocketMQSourceConstant.TOPIC, RocketMQSourceConstant.DEFAULT_TOPIC);
@@ -59,7 +58,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         consumer = RocketMQSourceUtil.getConsumerInstance(context);
 
         if ( null == counter ) {
-            counter = new RocketMQSourceCounter(getName());
+            counter = new SourceCounter(getName());
         }
     }
 
@@ -148,23 +147,19 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     }
 
     private void processEvent(List<Event> events, MessageQueue messageQueue, long offset) throws MQClientException {
-        long receivedTime = System.currentTimeMillis();
-        counter.addToEventReceivedCount(events.size());
-        counter.addToEventReceivedTimer((receivedTime-startTime)/1000);
+        int eventSize = events.size();
+        counter.addToEventReceivedCount(eventSize);
 
         getChannelProcessor().processEventBatch(events);
         consumer.updateConsumeOffset(messageQueue, offset);
         events.clear();
 
-        long acceptedTime = System.currentTimeMillis();
-        counter.addToEventAcceptedCount(events.size());
-        counter.addToEventAcceptedTimer((acceptedTime - receivedTime) / 1000);
-
+        counter.addToEventAcceptedCount(eventSize);
     }
 
     @Override public Status process() throws EventDeliveryException {
         try {
-            startTime = System.currentTimeMillis();
+//            startTime = System.currentTimeMillis();
             Set<MessageQueue> messageQueueSet = messageQueues.get();
             if ( null == messageQueueSet || messageQueueSet.isEmpty() ) {
                 LOG.warn("Message queues allocated to this client are currently empty");

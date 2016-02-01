@@ -1,6 +1,7 @@
 package com.ndpmedia.flume.source.rocketmq;
 
 import org.apache.flume.instrumentation.SourceCounter;
+import org.apache.flume.instrumentation.SourceCounterMBean;
 
 /**
  * RocketMQSourceCounter Created with rocketmq-flume.
@@ -9,7 +10,7 @@ import org.apache.flume.instrumentation.SourceCounter;
  * @date 15/12/29 下午4:47
  * @desc
  */
-public class RocketMQSourceCounter extends SourceCounter{
+public class RocketMQSourceCounter extends SourceCounter implements RocketMQSourceCounterMBean, SourceCounterMBean {
 
     private static final String TIMER_RMQ_EVENT_RECEIVED =
             "source.rmq.event.received.time";
@@ -33,5 +34,13 @@ public class RocketMQSourceCounter extends SourceCounter{
     }
     public long addToEventAcceptedTimer(long delta) {
         return addAndGet(TIMER_RMQ_EVENT_ACCEPTED,delta);
+    }
+
+    @Override public long getEventReceivedTimer() {
+        return get(TIMER_RMQ_EVENT_RECEIVED);
+    }
+
+    @Override public long getEventAcceptedTimer() {
+        return get(TIMER_RMQ_EVENT_ACCEPTED);
     }
 }
