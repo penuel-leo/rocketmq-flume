@@ -159,7 +159,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     @Override public Status process() throws EventDeliveryException {
         try {
-//            startTime = System.currentTimeMillis();
+            //            startTime = System.currentTimeMillis();
             Set<MessageQueue> messageQueueSet = messageQueues.get();
             if ( null == messageQueueSet || messageQueueSet.isEmpty() ) {
                 LOG.warn("Message queues allocated to this client are currently empty");
@@ -184,6 +184,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             consumer.registerMessageQueueListener(topic, new DefaultMessageQueueListener());
             Set<MessageQueue> messageQueueSet = consumer.fetchSubscribeMessageQueues(topic);
             messageQueues.set(messageQueueSet);
+            counter.setOpenConnectionCount(messageQueueSet == null ? 0 : messageQueueSet.size());
         } catch ( MQClientException e ) {
             LOG.error("RocketMQSource start consumer failed", e);
         }
