@@ -8,6 +8,7 @@ import com.alibaba.rocketmq.client.producer.SendStatus;
 import com.alibaba.rocketmq.common.message.Message;
 import org.apache.flume.*;
 import org.apache.flume.conf.Configurable;
+import org.apache.flume.instrumentation.SinkCounter;
 import org.apache.flume.sink.AbstractSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +40,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
     private boolean asyn = true;//是否异步发送
 
+    private SinkCounter counter;
+
     @Override public void configure(Context context) {
         // 获取配置项
         topic = context.getString(RocketMQSinkConstant.TOPIC, RocketMQSinkConstant.DEFAULT_TOPIC);
@@ -51,6 +54,10 @@ public class RocketMQSink extends AbstractSink implements Configurable {
         extra = context.getString(RocketMQSinkConstant.EXTRA,null);
 
         asyn = context.getBoolean(RocketMQSinkConstant.ASYN, true);
+`
+        if ( null == counter ) {
+            counter = new SinkCounter(getName());
+        }
 
         if ( LOG.isInfoEnabled() ) {
             LOG.info("RocketMQSource configure success, topic={},tag={},allow={},deny={},extra={}, asyn={}", topic, tag, allow, deny, extra, asyn);
@@ -90,6 +97,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
             // 发送消息
 
             final Message msg = new Message(topic, tag, event.getBody());
+            counter.incrementEventDrainAttemptCount();
+
             if (null != event.getHeaders() && event.getHeaders().size() > 0 ){
                 for ( Map.Entry<String,String> entry : event.getHeaders().entrySet() ){
                     msg.putUserProperty(entry.getKey(),entry.getValue());
@@ -104,6 +113,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
                     @Override public void onSuccess(SendResult sendResult) {
                         LOG.debug("send success msg:{},result:{}",msg,sendResult);
+                        counter.incrementEventDrainSuccessCount();
                     }
 
                     @Override public void onException(Throwable e) {
@@ -124,6 +134,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                 LOG.debug("sendResult->{}", sendResult);
                 if ( null == sendResult || sendResult.getSendStatus() != SendStatus.SEND_OK ) {
                     LOG.warn("sync send msg fail:sendResult={}", sendResult);
+                }else{
+                    counter.incrementEventDrainSuccessCount();
                 }
             }
             tx.commit();
@@ -147,6 +159,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
         try {
             LOG.warn("RocketMQSink start producer... ");
             producer.start();
+            counter.start();
+            counter.incrementConnectionCreatedCount();
         } catch ( MQClientException e ) {
             LOG.error("RocketMQSink start producer failed", e);
         }
@@ -157,6 +171,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
     public synchronized void stop() {
         // 停止Producer
         producer.shutdown();
+        counter.incrementConnectionClosedCount();
+        counter.stop();
         super.stop();
         LOG.warn("RocketMQSink stop producer... ");
     }
