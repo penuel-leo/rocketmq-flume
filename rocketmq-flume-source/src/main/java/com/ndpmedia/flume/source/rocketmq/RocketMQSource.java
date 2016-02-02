@@ -51,7 +51,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     @Override public void configure(Context context) {
         topic = context.getString(RocketMQSourceConstant.TOPIC, RocketMQSourceConstant.DEFAULT_TOPIC);
         tag = context.getString(RocketMQSourceConstant.TAG, RocketMQSourceConstant.DEFAULT_TAG);
-        extra = context.getString(RocketMQSourceConstant.EXTRA, null);
+        extra = context.getString(RocketMQSourceConstant.EXTRA, "");
         String messageModel = context.getString(RocketMQSourceConstant.MESSAGE_MODEL, RocketMQSourceConstant.DEFAULT_MESSAGE_MODEL);
         String fromWhere = context.getString(RocketMQSourceConstant.CONSUME_FROM_WHERE, RocketMQSourceConstant.DEFAULT_CONSUME_FROM_WHERE);
         pullBatchSize = context.getInteger(RocketMQSourceConstant.PULL_BATCH_SIZE, RocketMQSourceConstant.DEFAULT_PULL_BATCH_SIZE);
@@ -81,7 +81,9 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                 Map<String, String> headers = new HashMap<String, String>();
                 headers.put(RocketMQSourceConstant.TOPIC, topic);
                 headers.put(RocketMQSourceConstant.TAG, tag);
-                headers.put(RocketMQSourceConstant.EXTRA, extra);
+                if ( null != extra && extra.length() > 0 ) {
+                    headers.put(RocketMQSourceConstant.EXTRA, extra);
+                }
                 headers.putAll(messageExt.getProperties());
                 event.setHeaders(headers);
                 event.setBody(messageExt.getBody());

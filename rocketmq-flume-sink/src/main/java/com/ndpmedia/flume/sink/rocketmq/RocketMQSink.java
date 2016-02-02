@@ -54,7 +54,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
         extra = context.getString(RocketMQSinkConstant.EXTRA,null);
 
         asyn = context.getBoolean(RocketMQSinkConstant.ASYN, true);
-        
+
         if ( null == counter ) {
             counter = new SinkCounter(getName());
         }
