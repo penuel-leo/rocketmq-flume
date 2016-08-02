@@ -48,7 +48,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     private static final int BUFFER_FULL_THRESHOLD = 10000;
 
     private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>> cache = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>>();
-    private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>> window = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>>();
+    private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>> windows = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>>();
     private final ScheduledExecutorService pullThreadPool = Executors.newSingleThreadScheduledExecutor();
 
     @Override
@@ -114,9 +114,9 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                 while (count < CONSUME_BATCH_SIZE && (messageExt = next.getValue().pollFirst()) != null) {
                     count++;
                     events.add(wrap(messageExt));
-                    ConcurrentSkipListSet<Long> windowItem = window.get(next.getKey());
-                    if (null != windowItem) {
-                        windowItem.add(messageExt.getQueueOffset());
+                    ConcurrentSkipListSet<Long> window = windows.get(next.getKey());
+                    if (null != window) {
+                        window.add(messageExt.getQueueOffset());
                     }
                 }
             }
@@ -133,7 +133,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         OffsetStore offsetStore = consumer.getOffsetStore();
         Set<MessageQueue> updated = new HashSet<MessageQueue>();
         // calculate offsets according to consuming windows.
-        for (ConcurrentHashMap.Entry<MessageQueue, ConcurrentSkipListSet<Long>> entry : window.entrySet()) {
+        for (ConcurrentHashMap.Entry<MessageQueue, ConcurrentSkipListSet<Long>> entry : windows.entrySet()) {
             while (!entry.getValue().isEmpty()) {
 
                 long offset = offsetStore.readOffset(entry.getKey(), ReadOffsetType.MEMORY_FIRST_THEN_STORE);
@@ -202,7 +202,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                 for (MessageQueue messageQueue : previous) {
                     if (!mqDivided.contains(messageQueue)) {
                         cache.remove(messageQueue);
-                        window.remove(messageQueue);
+                        windows.remove(messageQueue);
                         LOG.info("Remove message queue: {}", messageQueue.toString());
                     }
                 }
@@ -211,7 +211,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             for (MessageQueue messageQueue : mqDivided) {
                 if (null != previous && !previous.contains(messageQueue)) {
                     cache.put(messageQueue, new ConcurrentSkipListSet<MessageExt>(new MessageComparator()));
-                    window.put(messageQueue, new ConcurrentSkipListSet<Long>());
+                    windows.put(messageQueue, new ConcurrentSkipListSet<Long>());
                     LOG.info("Add message queue: {}", messageQueue.toString());
                 }
             }
