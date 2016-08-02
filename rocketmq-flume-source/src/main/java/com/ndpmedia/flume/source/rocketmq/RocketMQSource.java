@@ -1,16 +1,11 @@
 package com.ndpmedia.flume.source.rocketmq;
 
 import com.alibaba.rocketmq.client.consumer.*;
-import com.alibaba.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
-import com.alibaba.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
-import com.alibaba.rocketmq.client.consumer.listener.MessageListener;
-import com.alibaba.rocketmq.client.consumer.listener.MessageListenerConcurrently;
-import com.alibaba.rocketmq.client.exception.MQBrokerException;
+import com.alibaba.rocketmq.client.consumer.store.OffsetStore;
+import com.alibaba.rocketmq.client.consumer.store.ReadOffsetType;
 import com.alibaba.rocketmq.client.exception.MQClientException;
 import com.alibaba.rocketmq.common.message.MessageExt;
 import com.alibaba.rocketmq.common.message.MessageQueue;
-import com.alibaba.rocketmq.remoting.exception.RemotingException;
-import com.google.common.base.Preconditions;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.EventDeliveryException;
@@ -22,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -39,7 +35,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private String tag;
 
-    private MQPullConsumer consumer;
+    private DefaultMQPullConsumer consumer;
 
     private String extra;
 
@@ -47,148 +43,309 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private int pullBatchSize;
 
+    private static final int CONSUME_BATCH_SIZE = 100;
 
-    @Override public void configure(Context context) {
+    private static final int BUFFER_FULL_THRESHOLD = 10000;
+
+    private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>> cache = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>>();
+    private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>> window = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>>();
+    private final ScheduledExecutorService pullThreadPool = Executors.newSingleThreadScheduledExecutor();
+
+    @Override
+    public void configure(Context context) {
         topic = context.getString(RocketMQSourceConstant.TOPIC, RocketMQSourceConstant.DEFAULT_TOPIC);
         tag = context.getString(RocketMQSourceConstant.TAG, RocketMQSourceConstant.DEFAULT_TAG);
         extra = context.getString(RocketMQSourceConstant.EXTRA, null);
-        String messageModel = context.getString(RocketMQSourceConstant.MESSAGE_MODEL, RocketMQSourceConstant.DEFAULT_MESSAGE_MODEL);
-        String fromWhere = context.getString(RocketMQSourceConstant.CONSUME_FROM_WHERE, RocketMQSourceConstant.DEFAULT_CONSUME_FROM_WHERE);
         pullBatchSize = context.getInteger(RocketMQSourceConstant.PULL_BATCH_SIZE, RocketMQSourceConstant.DEFAULT_PULL_BATCH_SIZE);
         consumer = RocketMQSourceUtil.getConsumerInstance(context);
 
     }
 
-    private boolean handlePullResult(PullResult pullResult, List<Event> events) {
-        Preconditions.checkNotNull(events);
-        Preconditions.checkNotNull(pullResult);
+    private boolean hasPendingMessage() {
 
-        switch (pullResult.getPullStatus()) {
-            case FOUND:
-                List<MessageExt> messages = pullResult.getMsgFoundList();
-                LOG.debug("Pulled {} messages", messages.size());
-                for (MessageExt messageExt : messages) {
-                    // filter by tag.
-                    if (null != tag && !tag.trim().equals("*")) {
-                        if (!tag.trim().equals(messageExt.getTags())) {
-                            continue;
-                        }
-                    }
-                    Event event = new SimpleEvent();
-                    Map<String, String> headers = new HashMap<String, String>();
-                    headers.put(RocketMQSourceConstant.TOPIC, topic);
-                    headers.put(RocketMQSourceConstant.TAG, tag);
-                    headers.put(RocketMQSourceConstant.EXTRA, extra);
-                    headers.putAll(messageExt.getProperties());
-                    event.setHeaders(headers);
-                    event.setBody(messageExt.getBody());
-                    events.add(event);
-                }
+        Set<MessageQueue> messageQueueSet = messageQueues.get();
+        if (null == messageQueueSet || messageQueueSet.isEmpty()) {
+            return false;
+        }
+
+        for (Map.Entry<MessageQueue, ConcurrentSkipListSet<MessageExt>> next : cache.entrySet()) {
+            if (!next.getValue().isEmpty()) {
                 return true;
-
-            case NO_MATCHED_MSG:
-                // fall through on purpose.
-            case NO_NEW_MSG:
-                break;
-
-            case SLAVE_LAG_BEHIND:
-                LOG.warn("The master broker is down!!");
-                break;
-
-            case SUBSCRIPTION_NOT_LATEST:
-                LOG.warn("Subscription is the latest");
-                break;
-
-            case OFFSET_ILLEGAL:
-                LOG.error("Illegal offset!!");
-                break;
-
-            default:
-                break;
+            }
         }
 
         return false;
     }
 
-    private void process0(Set<MessageQueue> messageQueues, boolean useLongPull, List<Event> events)
-            throws MQClientException, RemotingException, InterruptedException, MQBrokerException {
-        if (!useLongPull) {
-            boolean needToSwitch = false;
-            for (MessageQueue messageQueue : messageQueues) {
-                long offset = consumer.fetchConsumeOffset(messageQueue, false);
-                if (offset < 0) {
-                    offset = 0;
-                }
-                 do {
-                    PullResult pullResult = consumer.pull(messageQueue, tag, offset, pullBatchSize);
-                    needToSwitch = !handlePullResult(pullResult, events);
-                    if (!needToSwitch) {
-                        getChannelProcessor().processEventBatch(events);
-                        consumer.updateConsumeOffset(messageQueue, pullResult.getNextBeginOffset());
-                        events.clear();
+    private int countOfBufferedMessages() {
+        Set<MessageQueue> messageQueueSet = messageQueues.get();
+        if (null == messageQueueSet || messageQueueSet.isEmpty()) {
+            return 0;
+        }
 
-                        // Update next offset.
-                        offset = pullResult.getNextBeginOffset();
-                    }
-                } while (!needToSwitch);
-            }
-        } else {
-            // Randomly choose one message queue and start to long pulling.
-            MessageQueue messageQueue = messageQueues.iterator().next();
-            long offset = consumer.fetchConsumeOffset(messageQueue, false);
-            if (offset < 0) {
-                offset = 0;
-            }
-            PullResult pullResult = consumer.pullBlockIfNotFound(messageQueue, tag, offset, pullBatchSize);
-            if (handlePullResult(pullResult, events)) {
-                getChannelProcessor().processEventBatch(events);
-                consumer.updateConsumeOffset(messageQueue, pullResult.getNextBeginOffset());
+        int count = 0;
+        for (Map.Entry<MessageQueue, ConcurrentSkipListSet<MessageExt>> next : cache.entrySet()) {
+            if (!next.getValue().isEmpty()) {
+                count += next.getValue().size();
             }
         }
+
+        return count;
     }
 
-    @Override public Status process() throws EventDeliveryException {
-        try {
-            Set<MessageQueue> messageQueueSet = messageQueues.get();
-            if (null == messageQueueSet || messageQueueSet.isEmpty()) {
-                LOG.warn("Message queues allocated to this client are currently empty");
-                return Status.BACKOFF;
-            } else {
-                List<Event> events = new ArrayList<Event>();
-                process0(messageQueueSet, false, events);
-                process0(messageQueueSet, true, events);
+    private Event wrap(MessageExt messageExt) {
+        Event event = new SimpleEvent();
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put(RocketMQSourceConstant.TOPIC, topic);
+        headers.put(RocketMQSourceConstant.TAG, tag);
+        headers.put(RocketMQSourceConstant.EXTRA, extra);
+        headers.putAll(messageExt.getProperties());
+        event.setHeaders(headers);
+        event.setBody(messageExt.getBody());
+        return event;
+    }
+
+    private List<Event> take() {
+        List<Event> events = new ArrayList<Event>();
+        int count = 0;
+        for (Map.Entry<MessageQueue, ConcurrentSkipListSet<MessageExt>> next : cache.entrySet()) {
+            if (!next.getValue().isEmpty()) {
+                MessageExt messageExt = null;
+                while (count < CONSUME_BATCH_SIZE && (messageExt = next.getValue().pollFirst()) != null) {
+                    count++;
+                    events.add(wrap(messageExt));
+                    ConcurrentSkipListSet<Long> windowItem = window.get(next.getKey());
+                    if (null != windowItem) {
+                        windowItem.add(messageExt.getQueueOffset());
+                    }
+                }
             }
-        } catch ( Exception e ) {
+
+            if (count >= CONSUME_BATCH_SIZE) {
+                break;
+            }
+        }
+
+        return events;
+    }
+
+    private void updateOffset() {
+        OffsetStore offsetStore = consumer.getOffsetStore();
+        Set<MessageQueue> updated = new HashSet<MessageQueue>();
+        // calculate offsets according to consuming windows.
+        for (ConcurrentHashMap.Entry<MessageQueue, ConcurrentSkipListSet<Long>> entry : window.entrySet()) {
+            while (!entry.getValue().isEmpty()) {
+
+                long offset = offsetStore.readOffset(entry.getKey(), ReadOffsetType.MEMORY_FIRST_THEN_STORE);
+                if (offset + 1 > entry.getValue().first()) {
+                    entry.getValue().pollFirst();
+                } else if (offset + 1 == entry.getValue().first()) {
+                    entry.getValue().pollFirst();
+                    offsetStore.updateOffset(entry.getKey(), offset + 1, true);
+                    updated.add(entry.getKey());
+                } else {
+                    break;
+                }
+
+            }
+        }
+        offsetStore.persistAll(updated);
+    }
+
+    @Override
+    public Status process() throws EventDeliveryException {
+        try {
+            if (hasPendingMessage()) {
+                List<Event> events = take();
+                if (null != events && !events.isEmpty()) {
+                    getChannelProcessor().processEventBatch(events);
+                    updateOffset();
+                } else {
+                    throw new IllegalStateException("Should not happen");
+                }
+            } else {
+                LOG.info("No pending messages to process");
+                return Status.BACKOFF;
+            }
+        } catch (Exception e) {
             LOG.error("RocketMQSource process error", e);
             return Status.BACKOFF;
         }
         return Status.READY;
     }
 
-    @Override public synchronized void start() {
+    @Override
+    public synchronized void start() {
         try {
             LOG.warn("RocketMQSource start consumer... ");
+            consumer.registerMessageQueueListener(topic, new FlumeMessageQueueListener());
             consumer.start();
-            consumer.registerMessageQueueListener(topic, new DefaultMessageQueueListener());
-            Set<MessageQueue> messageQueueSet = consumer.fetchSubscribeMessageQueues(topic);
-            messageQueues.set(messageQueueSet);
-        } catch ( MQClientException e ) {
+        } catch (MQClientException e) {
             LOG.error("RocketMQSource start consumer failed", e);
         }
         super.start();
     }
 
-    @Override public synchronized void stop() {
+    @Override
+    public synchronized void stop() {
         // 停止Producer
         consumer.shutdown();
         super.stop();
         LOG.warn("RocketMQSource stop consumer... ");
     }
 
-    class DefaultMessageQueueListener implements MessageQueueListener {
+    private class FlumeMessageQueueListener implements MessageQueueListener {
         @Override
         public void messageQueueChanged(String topic, Set<MessageQueue> mqAll, Set<MessageQueue> mqDivided) {
-            messageQueues.getAndSet(mqDivided);
+            Set<MessageQueue> previous = messageQueues.getAndSet(mqDivided);
+            if (null != previous) {
+                for (MessageQueue messageQueue : previous) {
+                    if (!mqDivided.contains(messageQueue)) {
+                        cache.remove(messageQueue);
+                        window.remove(messageQueue);
+                        LOG.info("Remove message queue: {}", messageQueue.toString());
+                    }
+                }
+            }
+
+            for (MessageQueue messageQueue : mqDivided) {
+                if (null != previous && !previous.contains(messageQueue)) {
+                    cache.put(messageQueue, new ConcurrentSkipListSet<MessageExt>(new MessageComparator()));
+                    window.put(messageQueue, new ConcurrentSkipListSet<Long>());
+                    LOG.info("Add message queue: {}", messageQueue.toString());
+                }
+            }
         }
     }
+
+    private class FlumePullRequest {
+        private final MessageQueue messageQueue;
+        private final String subscription;
+        private final long offset;
+        private final int batchSize;
+
+        public FlumePullRequest(MessageQueue messageQueue, String subscription, long offset, int batchSize) {
+            this.messageQueue = messageQueue;
+            this.subscription = subscription;
+            this.offset = offset;
+            this.batchSize = batchSize;
+        }
+
+        public MessageQueue getMessageQueue() {
+            return messageQueue;
+        }
+
+        public long getOffset() {
+            return offset;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public String getSubscription() {
+            return subscription;
+        }
+    }
+
+    private class FlumePullTask implements Runnable {
+
+        private final MQPullConsumer pullConsumer;
+
+        private final FlumePullRequest flumePullRequest;
+
+        public FlumePullTask(MQPullConsumer pullConsumer, FlumePullRequest flumePullRequest) {
+            this.pullConsumer = pullConsumer;
+            this.flumePullRequest = flumePullRequest;
+        }
+
+        @Override
+        public void run() {
+            try {
+                pullConsumer.pullBlockIfNotFound(
+                        flumePullRequest.getMessageQueue(),
+                        flumePullRequest.getSubscription(),
+                        flumePullRequest.getOffset(),
+                        flumePullRequest.getBatchSize(),
+                        new FlumePullCallback(flumePullRequest.getMessageQueue(), flumePullRequest));
+            } catch (Throwable e) {
+                LOG.error("Failed to pull", e);
+            }
+        }
+    }
+
+    private void executePullRequest(FlumePullRequest flumePullRequest) {
+        pullThreadPool.execute(new FlumePullTask(consumer, flumePullRequest));
+    }
+
+    private void executePullRequestLater(FlumePullRequest flumePullRequest, long delay) {
+        pullThreadPool.schedule(new FlumePullTask(consumer, flumePullRequest), delay, TimeUnit.MILLISECONDS);
+    }
+
+    private class FlumePullCallback implements PullCallback {
+
+        private final MessageQueue messageQueue;
+
+        private final FlumePullRequest flumePullRequest;
+
+        public FlumePullCallback(MessageQueue messageQueue, FlumePullRequest flumePullRequest) {
+            this.messageQueue = messageQueue;
+            this.flumePullRequest = flumePullRequest;
+        }
+
+        @Override
+        public void onSuccess(PullResult pullResult) {
+            try {
+                switch (pullResult.getPullStatus()) {
+                    case FOUND:
+                        if (cache.containsKey(messageQueue)) {
+                            cache.get(messageQueue).addAll(pullResult.getMsgFoundList());
+                        } else {
+                            LOG.warn("Drop pulled message as message queue: {} has been reassigned to other clients", messageQueue.toString());
+                        }
+                        break;
+
+                    case NO_MATCHED_MSG:
+                        LOG.debug("No matched message found");
+                        break;
+
+                    default:
+                        LOG.error("Error status: {}", pullResult.getPullStatus().toString());
+                        break;
+                }
+
+            } catch (Throwable e) {
+                LOG.error("Failed to process pull result");
+            } finally {
+                FlumePullRequest request = new FlumePullRequest(messageQueue, tag, pullResult.getNextBeginOffset(), pullBatchSize);
+                if (countOfBufferedMessages() > BUFFER_FULL_THRESHOLD) {
+                    executePullRequestLater(request, 1000);
+                } else {
+                    executePullRequest(request);
+                }
+            }
+        }
+
+        @Override
+        public void onException(Throwable e) {
+            LOG.error("Pull message failed", e);
+            FlumePullRequest request = new FlumePullRequest(messageQueue, tag, flumePullRequest.getOffset() , pullBatchSize);
+            if (countOfBufferedMessages() > BUFFER_FULL_THRESHOLD) {
+                executePullRequestLater(request, BUFFER_FULL_THRESHOLD);
+            } else {
+                executePullRequest(request);
+            }
+        }
+    }
+
+    /**
+     * Compare messages pulled from same message queue according to queue offset.
+     */
+    private class MessageComparator implements Comparator<MessageExt> {
+        @Override
+        public int compare(MessageExt lhs, MessageExt rhs) {
+            return lhs.getQueueOffset() < rhs.getQueueOffset() ? -1 : (lhs.getQueueOffset() == rhs.getQueueOffset() ? 0 : 1);
+        }
+    }
+
 }
