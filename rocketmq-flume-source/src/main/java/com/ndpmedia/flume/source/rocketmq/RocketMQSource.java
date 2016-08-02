@@ -45,7 +45,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private static final int CONSUME_BATCH_SIZE = 100;
 
-    private static final int BUFFER_FULL_THRESHOLD = 10000;
+    private static final int WATER_MARK_LOW = 2000;
+
+    private static final int WATER_MARK_HIGH = 8000;
+
+    private ConcurrentHashMap<MessageQueue, Long> suspendedQueues = new ConcurrentHashMap<MessageQueue, Long>();
 
     private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>> cache = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>>();
     private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>> windows = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>>();
@@ -110,7 +114,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         int count = 0;
         for (Map.Entry<MessageQueue, ConcurrentSkipListSet<MessageExt>> next : cache.entrySet()) {
             if (!next.getValue().isEmpty()) {
-                MessageExt messageExt = null;
+                MessageExt messageExt;
                 while (count < CONSUME_BATCH_SIZE && (messageExt = next.getValue().pollFirst()) != null) {
                     count++;
                     events.add(wrap(messageExt));
@@ -124,6 +128,10 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             if (count >= CONSUME_BATCH_SIZE) {
                 break;
             }
+        }
+
+        if (countOfBufferedMessages() < WATER_MARK_LOW) {
+            resume();
         }
 
         return events;
@@ -224,26 +232,26 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         private final long offset;
         private final int batchSize;
 
-        public FlumePullRequest(MessageQueue messageQueue, String subscription, long offset, int batchSize) {
+        FlumePullRequest(MessageQueue messageQueue, String subscription, long offset, int batchSize) {
             this.messageQueue = messageQueue;
             this.subscription = subscription;
             this.offset = offset;
             this.batchSize = batchSize;
         }
 
-        public MessageQueue getMessageQueue() {
+        MessageQueue getMessageQueue() {
             return messageQueue;
         }
 
-        public long getOffset() {
+        long getOffset() {
             return offset;
         }
 
-        public int getBatchSize() {
+        int getBatchSize() {
             return batchSize;
         }
 
-        public String getSubscription() {
+        String getSubscription() {
             return subscription;
         }
     }
@@ -254,7 +262,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         private final FlumePullRequest flumePullRequest;
 
-        public FlumePullTask(MQPullConsumer pullConsumer, FlumePullRequest flumePullRequest) {
+        FlumePullTask(MQPullConsumer pullConsumer, FlumePullRequest flumePullRequest) {
             this.pullConsumer = pullConsumer;
             this.flumePullRequest = flumePullRequest;
         }
@@ -278,8 +286,16 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         pullThreadPool.execute(new FlumePullTask(consumer, flumePullRequest));
     }
 
-    private void executePullRequestLater(FlumePullRequest flumePullRequest, long delay) {
-        pullThreadPool.schedule(new FlumePullTask(consumer, flumePullRequest), delay, TimeUnit.MILLISECONDS);
+    private void resume() {
+        if (suspendedQueues.isEmpty()) {
+            return;
+        }
+
+        for (Map.Entry<MessageQueue, Long> next : suspendedQueues.entrySet()) {
+            FlumePullRequest request = new FlumePullRequest(next.getKey(), tag, next.getValue(), pullBatchSize);
+            executePullRequest(request);
+            suspendedQueues.remove(next.getKey());
+        }
     }
 
     private class FlumePullCallback implements PullCallback {
@@ -288,7 +304,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         private final FlumePullRequest flumePullRequest;
 
-        public FlumePullCallback(MessageQueue messageQueue, FlumePullRequest flumePullRequest) {
+        FlumePullCallback(MessageQueue messageQueue, FlumePullRequest flumePullRequest) {
             this.messageQueue = messageQueue;
             this.flumePullRequest = flumePullRequest;
         }
@@ -317,10 +333,10 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             } catch (Throwable e) {
                 LOG.error("Failed to process pull result");
             } finally {
-                FlumePullRequest request = new FlumePullRequest(messageQueue, tag, pullResult.getNextBeginOffset(), pullBatchSize);
-                if (countOfBufferedMessages() > BUFFER_FULL_THRESHOLD) {
-                    executePullRequestLater(request, 1000);
+                if (countOfBufferedMessages() > WATER_MARK_HIGH) {
+                    suspendedQueues.put(messageQueue, pullResult.getNextBeginOffset());
                 } else {
+                    FlumePullRequest request = new FlumePullRequest(messageQueue, tag, pullResult.getNextBeginOffset(), pullBatchSize);
                     executePullRequest(request);
                 }
             }
@@ -330,8 +346,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         public void onException(Throwable e) {
             LOG.error("Pull message failed", e);
             FlumePullRequest request = new FlumePullRequest(messageQueue, tag, flumePullRequest.getOffset() , pullBatchSize);
-            if (countOfBufferedMessages() > BUFFER_FULL_THRESHOLD) {
-                executePullRequestLater(request, BUFFER_FULL_THRESHOLD);
+            if (countOfBufferedMessages() > WATER_MARK_HIGH) {
+                suspendedQueues.put(messageQueue, flumePullRequest.getOffset());
             } else {
                 executePullRequest(request);
             }
