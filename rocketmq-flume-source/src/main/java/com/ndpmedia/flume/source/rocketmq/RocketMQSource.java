@@ -21,11 +21,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * RocketMQSource Created with rocketmq-flume.
- *
- * @author penuel (penuel.leo@gmail.com)
- * @date 15/9/17 下午12:13
- * @desc
+ * Implement a pull-based source model.
  */
 public class RocketMQSource extends AbstractSource implements Configurable, PollableSource {
 
