@@ -254,11 +254,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private class FlumePullTask implements Runnable {
 
-        private final MQPullConsumer pullConsumer;
+        private final DefaultMQPullConsumer pullConsumer;
 
         private final FlumePullRequest flumePullRequest;
 
-        FlumePullTask(MQPullConsumer pullConsumer, FlumePullRequest flumePullRequest) {
+        FlumePullTask(DefaultMQPullConsumer pullConsumer, FlumePullRequest flumePullRequest) {
             this.pullConsumer = pullConsumer;
             this.flumePullRequest = flumePullRequest;
         }
@@ -271,7 +271,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                         flumePullRequest.getSubscription(),
                         flumePullRequest.getOffset(),
                         flumePullRequest.getBatchSize(),
-                        new FlumePullCallback(flumePullRequest.getMessageQueue(), flumePullRequest));
+                        new FlumePullCallback(pullConsumer, flumePullRequest.getMessageQueue(), flumePullRequest));
             } catch (Throwable e) {
                 LOG.error("Failed to pull", e);
             }
@@ -296,11 +296,16 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private class FlumePullCallback implements PullCallback {
 
+        private final DefaultMQPullConsumer pullConsumer;
+
         private final MessageQueue messageQueue;
 
         private final FlumePullRequest flumePullRequest;
 
-        FlumePullCallback(MessageQueue messageQueue, FlumePullRequest flumePullRequest) {
+        private long nextBeginOffset;
+
+        FlumePullCallback(DefaultMQPullConsumer pullConsumer, MessageQueue messageQueue, FlumePullRequest flumePullRequest) {
+            this.pullConsumer = pullConsumer;
             this.messageQueue = messageQueue;
             this.flumePullRequest = flumePullRequest;
         }
@@ -315,13 +320,30 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                         } else {
                             LOG.warn("Drop pulled message as message queue: {} has been reassigned to other clients", messageQueue.toString());
                         }
+                        nextBeginOffset = pullResult.getNextBeginOffset();
                         break;
 
                     case NO_MATCHED_MSG:
                         LOG.debug("No matched message found");
+                        nextBeginOffset = pullResult.getNextBeginOffset();
+                        break;
+
+                    case OFFSET_ILLEGAL: // Correct offset.
+                        nextBeginOffset = pullConsumer.fetchConsumeOffset(messageQueue, true);
+                        long min = pullConsumer.minOffset(messageQueue);
+                        long max = pullConsumer.maxOffset(messageQueue);
+
+                        if (nextBeginOffset > max) {
+                            nextBeginOffset = max;
+                        }
+
+                        if (nextBeginOffset < min) {
+                            nextBeginOffset = min;
+                        }
                         break;
 
                     default:
+                        nextBeginOffset = pullResult.getNextBeginOffset();
                         LOG.error("Error status: {}", pullResult.getPullStatus().toString());
                         break;
                 }
@@ -332,7 +354,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                 if (countOfBufferedMessages() > WATER_MARK_HIGH) {
                     suspendedQueues.put(messageQueue, pullResult.getNextBeginOffset());
                 } else {
-                    FlumePullRequest request = new FlumePullRequest(messageQueue, tag, pullResult.getNextBeginOffset(), pullBatchSize);
+                    FlumePullRequest request = new FlumePullRequest(messageQueue, tag, nextBeginOffset, pullBatchSize);
                     executePullRequest(request);
                 }
             }
@@ -356,7 +378,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     private class MessageComparator implements Comparator<MessageExt> {
         @Override
         public int compare(MessageExt lhs, MessageExt rhs) {
-            return lhs.getQueueOffset() < rhs.getQueueOffset() ? -1 : (lhs.getQueueOffset() == rhs.getQueueOffset() ? 0 : 1);
+            return Long.compare(lhs.getQueueOffset(), rhs.getQueueOffset());
         }
     }
 
