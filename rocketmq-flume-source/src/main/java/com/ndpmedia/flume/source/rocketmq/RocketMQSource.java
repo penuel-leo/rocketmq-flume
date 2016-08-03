@@ -344,7 +344,9 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                 switch (pullResult.getPullStatus()) {
                     case FOUND:
                         if (cache.containsKey(messageQueue)) {
-                            cache.get(messageQueue).addAll(pullResult.getMsgFoundList());
+                            List<MessageExt> messages = pullResult.getMsgFoundList();
+                            cache.get(messageQueue).addAll(messages);
+                            LOG.debug("Pulled {} messages to local cache", messages.size());
                         } else {
                             LOG.warn("Drop pulled message as message queue: {} has been reassigned to other clients", messageQueue.toString());
                         }
@@ -353,6 +355,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
                     case NO_MATCHED_MSG:
                         LOG.debug("No matched message found");
+                        nextBeginOffset = pullResult.getNextBeginOffset();
+                        break;
+
+                    case NO_NEW_MSG:
+                        LOG.debug("No new message");
                         nextBeginOffset = pullResult.getNextBeginOffset();
                         break;
 
