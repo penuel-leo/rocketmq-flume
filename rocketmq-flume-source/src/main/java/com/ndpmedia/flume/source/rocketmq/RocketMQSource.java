@@ -330,15 +330,15 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
                     case OFFSET_ILLEGAL: // Correct offset.
                         nextBeginOffset = pullConsumer.fetchConsumeOffset(messageQueue, true);
-                        long min = pullConsumer.minOffset(messageQueue);
-                        long max = pullConsumer.maxOffset(messageQueue);
 
+                        long max = pullConsumer.maxOffset(messageQueue);
                         if (nextBeginOffset > max) {
                             nextBeginOffset = max;
-                        }
-
-                        if (nextBeginOffset < min) {
-                            nextBeginOffset = min;
+                        } else {
+                            long min = pullConsumer.minOffset(messageQueue);
+                            if (nextBeginOffset < min) {
+                                nextBeginOffset = min;
+                            }
                         }
                         break;
 
