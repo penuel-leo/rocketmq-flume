@@ -182,7 +182,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     public synchronized void start() {
         try {
             LOG.warn("RocketMQSource start consumer... ");
-            consumer.registerMessageQueueListener(topic, new FlumeMessageQueueListener());
+            consumer.registerMessageQueueListener(topic, new FlumeMessageQueueListener(consumer));
             consumer.start();
         } catch (MQClientException e) {
             LOG.error("RocketMQSource start consumer failed", e);
@@ -199,6 +199,12 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     }
 
     private class FlumeMessageQueueListener implements MessageQueueListener {
+        private final DefaultMQPullConsumer pullConsumer;
+
+        FlumeMessageQueueListener(DefaultMQPullConsumer pullConsumer) {
+            this.pullConsumer = pullConsumer;
+        }
+
         @Override
         public void messageQueueChanged(String topic, Set<MessageQueue> mqAll, Set<MessageQueue> mqDivided) {
             Set<MessageQueue> previous = messageQueues.getAndSet(mqDivided);
@@ -213,11 +219,26 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             }
 
             for (MessageQueue messageQueue : mqDivided) {
-                if (null != previous && !previous.contains(messageQueue)) {
-                    cache.put(messageQueue, new ConcurrentSkipListSet<MessageExt>(new MessageComparator()));
+                if (null == previous || !previous.contains(messageQueue)) {
+                    cache.put(messageQueue, new ConcurrentSkipListSet<>(new MessageComparator()));
                     windows.put(messageQueue, new ConcurrentSkipListSet<Long>());
+
+                    try {
+                        long offset = pullConsumer.fetchConsumeOffset(messageQueue, true);
+                        FlumePullRequest request = new FlumePullRequest(messageQueue, tag, offset, pullBatchSize);
+                        executePullRequest(request);
+                    } catch (Throwable e) {
+                        LOG.error("Failed to fetchConsumeOffset", e);
+                    }
+
                     LOG.info("Add message queue: {}", messageQueue.toString());
                 }
+            }
+
+            LOG.debug("Current consuming the following message queues:");
+            int index = 0;
+            for (MessageQueue messageQueue : mqDivided) {
+                LOG.debug((index++) + ": " +  messageQueue.toString());
             }
         }
     }
@@ -266,6 +287,12 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         @Override
         public void run() {
             try {
+                LOG.debug("Begin to pull message queue: {}, tag: {}, beginOffset: {}, pullBatchSize: {}",
+                        flumePullRequest.getMessageQueue().toString(),
+                        flumePullRequest.getSubscription(),
+                        flumePullRequest.getOffset(),
+                        flumePullRequest.getBatchSize());
+
                 pullConsumer.pullBlockIfNotFound(
                         flumePullRequest.getMessageQueue(),
                         flumePullRequest.getSubscription(),
@@ -279,7 +306,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     }
 
     private void executePullRequest(FlumePullRequest flumePullRequest) {
-        pullThreadPool.execute(new FlumePullTask(consumer, flumePullRequest));
+        pullThreadPool.submit(new FlumePullTask(consumer, flumePullRequest));
     }
 
     private void resume() {
@@ -313,6 +340,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         @Override
         public void onSuccess(PullResult pullResult) {
             try {
+                LOG.debug("Pull success, begin to process pull result. message queue: {}", messageQueue.toString());
                 switch (pullResult.getPullStatus()) {
                     case FOUND:
                         if (cache.containsKey(messageQueue)) {
@@ -362,7 +390,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         @Override
         public void onException(Throwable e) {
-            LOG.error("Pull message failed", e);
+            LOG.error("Pull failed", e);
             FlumePullRequest request = new FlumePullRequest(messageQueue, tag, flumePullRequest.getOffset() , pullBatchSize);
             if (countOfBufferedMessages() > WATER_MARK_HIGH) {
                 suspendedQueues.put(messageQueue, flumePullRequest.getOffset());
