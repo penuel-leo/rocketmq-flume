@@ -252,7 +252,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         FlumePullRequest(MessageQueue messageQueue, String subscription, long offset, int batchSize) {
             this.messageQueue = messageQueue;
             this.subscription = subscription;
-            this.offset = offset;
+            if (offset < 0) {
+                this.offset = 0;
+            } else {
+                this.offset = offset;
+            }
             this.batchSize = batchSize;
         }
 
