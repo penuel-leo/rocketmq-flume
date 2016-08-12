@@ -379,9 +379,16 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                 switch (pullResult.getPullStatus()) {
                     case FOUND:
                         if (messageQueues.get().contains(messageQueue)) {
+
                             if (!cache.containsKey(messageQueue)) {
+                                LOG.warn("Cache misses key: {}", messageQueue.toString());
                                 cache.putIfAbsent(messageQueue, new ConcurrentSkipListSet<>(new MessageComparator()));
+                            }
+
+                            if (!windows.containsKey(messageQueue)) {
+                                LOG.warn("Window misses key: {}", messageQueue.toString());
                                 windows.putIfAbsent(messageQueue, new ConcurrentSkipListSet<Long>());
+
                             }
 
                             List<MessageExt> messages = pullResult.getMsgFoundList();
@@ -406,42 +413,26 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                         break;
 
                     case OFFSET_ILLEGAL: // Correct offset.
+
+                        // Take offset suggested by broker as next begin offset
+                        nextBeginOffset = pullResult.getNextBeginOffset();
+
+                        LOG.error("Begin to correct offset");
+                        // Try very hard to correct offset
+                        boolean correctOffsetSucessful = false;
                         for (int i = 0; i < 5; i++) {
                             try {
-                                nextBeginOffset =pullConsumer.fetchConsumeOffset(messageQueue, true);
+                                pullConsumer.getOffsetStore().updateOffset(messageQueue, nextBeginOffset, false);
+                                pullConsumer.getOffsetStore().persist(messageQueue);
+                                correctOffsetSucessful = true;
+                                LOG.error("Correct offset OK");
                                 break;
-                            } catch (Throwable e) {
-                                LOG.error("Failed to fetch consume offset {} time(s)", (i+1));
+                            } catch (Throwable ignore) {
                             }
                         }
 
-                        long max = -1;
-                        for (int i = 0; i < 5; i++) {
-                            try {
-                                max = pullConsumer.maxOffset(messageQueue);
-                                break;
-                            } catch (Throwable e) {
-                                LOG.error("Failed to fetch max offset {} times", (i+1));
-                            }
-                        }
-
-                        if (nextBeginOffset > max) {
-                            nextBeginOffset = max;
-                        } else {
-
-                            long min = - 1;
-                            for (int i = 0; i < 5; i++) {
-                                try {
-                                    min = pullConsumer.minOffset(messageQueue);
-                                    break;
-                                } catch (Throwable e) {
-                                    LOG.error("Failed to fetch min offset {} times", (i+1));
-                                }
-                            }
-
-                            if (nextBeginOffset < min) {
-                                nextBeginOffset = min;
-                            }
+                        if (!correctOffsetSucessful) {
+                            LOG.error("Correct illegal offset failed");
                         }
                         break;
 
@@ -460,6 +451,15 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     } else {
                         FlumePullRequest request = new FlumePullRequest(messageQueue, tag, nextBeginOffset, pullBatchSize);
                         executePullRequest(request);
+                    }
+                } else {
+                    // in case there is any dirty data.
+                    if (windows.containsKey(messageQueue)) {
+                        windows.remove(messageQueue);
+                    }
+
+                    if (cache.containsKey(messageQueue)) {
+                        cache.remove(messageQueue);
                     }
                 }
             }
