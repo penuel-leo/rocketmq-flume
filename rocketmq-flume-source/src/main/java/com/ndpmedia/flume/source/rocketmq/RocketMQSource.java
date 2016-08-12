@@ -35,7 +35,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private String extra;
 
-    private AtomicReference<Set<MessageQueue>> messageQueues = new AtomicReference<Set<MessageQueue>>();
+    private AtomicReference<Set<MessageQueue>> messageQueues = new AtomicReference<>();
 
     private int pullBatchSize;
 
@@ -60,7 +60,6 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         extra = context.getString(RocketMQSourceConstant.EXTRA, null);
         pullBatchSize = context.getInteger(RocketMQSourceConstant.PULL_BATCH_SIZE, RocketMQSourceConstant.DEFAULT_PULL_BATCH_SIZE);
         consumer = RocketMQSourceUtil.getConsumerInstance(context);
-
     }
 
     private boolean hasPendingMessage() {
@@ -209,38 +208,58 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         @Override
         public void messageQueueChanged(String topic, Set<MessageQueue> mqAll, Set<MessageQueue> mqDivided) {
+            boolean logRebalanceEvent = false;
             Set<MessageQueue> previous = messageQueues.getAndSet(mqDivided);
             if (null != previous) {
                 for (MessageQueue messageQueue : previous) {
                     if (!mqDivided.contains(messageQueue)) {
                         cache.remove(messageQueue);
                         windows.remove(messageQueue);
+                        logRebalanceEvent = true;
                         LOG.info("Remove message queue: {}", messageQueue.toString());
+                    }
+
+                    if (!mqAll.contains(messageQueue)) {
+                        logRebalanceEvent = true;
+                        LOG.warn("Message Queue {} is not among known queues, maybe one or more brokers is down",
+                                messageQueue.toString());
                     }
                 }
             }
 
             for (MessageQueue messageQueue : mqDivided) {
                 if (null == previous || !previous.contains(messageQueue)) {
-                    cache.put(messageQueue, new ConcurrentSkipListSet<>(new MessageComparator()));
-                    windows.put(messageQueue, new ConcurrentSkipListSet<Long>());
+                    cache.putIfAbsent(messageQueue, new ConcurrentSkipListSet<>(new MessageComparator()));
+                    windows.putIfAbsent(messageQueue, new ConcurrentSkipListSet<Long>());
+                    logRebalanceEvent = true;
 
-                    try {
-                        long offset = pullConsumer.fetchConsumeOffset(messageQueue, true);
-                        FlumePullRequest request = new FlumePullRequest(messageQueue, tag, offset, pullBatchSize);
-                        executePullRequest(request);
-                    } catch (Throwable e) {
-                        LOG.error("Failed to fetchConsumeOffset", e);
+                    long consumeOffset = -1;
+                    for (int i = 0; i < 5; ) {
+                        try {
+                            consumeOffset = pullConsumer.fetchConsumeOffset(messageQueue, true);
+                            break;
+                        } catch (Throwable e) {
+                            ++i;
+                            LOG.error("Failed to fetchConsumeOffset {} time(s)", i);
+                            LOG.error("Exception Stack Trace", e);
+                        }
                     }
+
+                    FlumePullRequest request = new FlumePullRequest(messageQueue, tag,
+                            consumeOffset < 0 ? 0 : consumeOffset, // consume offset
+                            pullBatchSize);
+                    executePullRequest(request);
 
                     LOG.info("Add message queue: {}", messageQueue.toString());
                 }
             }
-
-            LOG.debug("Current consuming the following message queues:");
-            int index = 0;
-            for (MessageQueue messageQueue : mqDivided) {
-                LOG.debug((index++) + ": " +  messageQueue.toString());
+            if (logRebalanceEvent) {
+                LOG.warn("Rebalance just happened!!!");
+                LOG.debug("Current consuming the following message queues:");
+                int index = 0;
+                for (MessageQueue messageQueue : mqDivided) {
+                    LOG.debug((index++) + ": " +  messageQueue.toString());
+                }
             }
         }
     }
@@ -325,6 +344,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         }
 
         for (Map.Entry<MessageQueue, Long> next : suspendedQueues.entrySet()) {
+
+            if (!messageQueues.get().contains(next.getKey())) { // Skip those queues that has been reassigned.
+                continue;
+            }
+
             FlumePullRequest request = new FlumePullRequest(next.getKey(), tag, next.getValue(), pullBatchSize);
             executePullRequest(request);
             suspendedQueues.remove(next.getKey());
@@ -349,16 +373,24 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         @Override
         public void onSuccess(PullResult pullResult) {
+            boolean dropped = false;
             try {
                 LOG.debug("Pull success, begin to process pull result. message queue: {}", messageQueue.toString());
                 switch (pullResult.getPullStatus()) {
                     case FOUND:
-                        if (cache.containsKey(messageQueue)) {
+                        if (messageQueues.get().contains(messageQueue)) {
+                            if (!cache.containsKey(messageQueue)) {
+                                cache.putIfAbsent(messageQueue, new ConcurrentSkipListSet<>(new MessageComparator()));
+                                windows.putIfAbsent(messageQueue, new ConcurrentSkipListSet<Long>());
+                            }
+
                             List<MessageExt> messages = pullResult.getMsgFoundList();
                             cache.get(messageQueue).addAll(messages);
                             LOG.debug("Pulled {} messages to local cache", messages.size());
                         } else {
+                            dropped = true;
                             LOG.warn("Drop pulled message as message queue: {} has been reassigned to other clients", messageQueue.toString());
+                            return;
                         }
                         nextBeginOffset = pullResult.getNextBeginOffset();
                         break;
@@ -374,13 +406,39 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                         break;
 
                     case OFFSET_ILLEGAL: // Correct offset.
-                        nextBeginOffset = pullConsumer.fetchConsumeOffset(messageQueue, true);
+                        for (int i = 0; i < 5; i++) {
+                            try {
+                                nextBeginOffset =pullConsumer.fetchConsumeOffset(messageQueue, true);
+                                break;
+                            } catch (Throwable e) {
+                                LOG.error("Failed to fetch consume offset {} time(s)", (i+1));
+                            }
+                        }
 
-                        long max = pullConsumer.maxOffset(messageQueue);
+                        long max = -1;
+                        for (int i = 0; i < 5; i++) {
+                            try {
+                                max = pullConsumer.maxOffset(messageQueue);
+                                break;
+                            } catch (Throwable e) {
+                                LOG.error("Failed to fetch max offset {} times", (i+1));
+                            }
+                        }
+
                         if (nextBeginOffset > max) {
                             nextBeginOffset = max;
                         } else {
-                            long min = pullConsumer.minOffset(messageQueue);
+
+                            long min = - 1;
+                            for (int i = 0; i < 5; i++) {
+                                try {
+                                    min = pullConsumer.minOffset(messageQueue);
+                                    break;
+                                } catch (Throwable e) {
+                                    LOG.error("Failed to fetch min offset {} times", (i+1));
+                                }
+                            }
+
                             if (nextBeginOffset < min) {
                                 nextBeginOffset = min;
                             }
@@ -396,11 +454,13 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             } catch (Throwable e) {
                 LOG.error("Failed to process pull result");
             } finally {
-                if (countOfBufferedMessages() > WATER_MARK_HIGH) {
-                    suspendedQueues.put(messageQueue, pullResult.getNextBeginOffset());
-                } else {
-                    FlumePullRequest request = new FlumePullRequest(messageQueue, tag, nextBeginOffset, pullBatchSize);
-                    executePullRequest(request);
+                if (!dropped) {
+                    if (countOfBufferedMessages() > WATER_MARK_HIGH) {
+                        suspendedQueues.put(messageQueue, pullResult.getNextBeginOffset());
+                    } else {
+                        FlumePullRequest request = new FlumePullRequest(messageQueue, tag, nextBeginOffset, pullBatchSize);
+                        executePullRequest(request);
+                    }
                 }
             }
         }
