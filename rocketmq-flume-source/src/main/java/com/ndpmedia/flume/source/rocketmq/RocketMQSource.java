@@ -419,19 +419,19 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
                         LOG.error("Begin to correct offset");
                         // Try very hard to correct offset
-                        boolean correctOffsetSucessful = false;
+                        boolean correctOffsetSuccessful = false;
                         for (int i = 0; i < 5; i++) {
                             try {
                                 pullConsumer.getOffsetStore().updateOffset(messageQueue, nextBeginOffset, false);
                                 pullConsumer.getOffsetStore().persist(messageQueue);
-                                correctOffsetSucessful = true;
+                                correctOffsetSuccessful = true;
                                 LOG.error("Correct offset OK");
                                 break;
                             } catch (Throwable ignore) {
                             }
                         }
 
-                        if (!correctOffsetSucessful) {
+                        if (!correctOffsetSuccessful) {
                             LOG.error("Correct illegal offset failed");
                         }
                         break;
