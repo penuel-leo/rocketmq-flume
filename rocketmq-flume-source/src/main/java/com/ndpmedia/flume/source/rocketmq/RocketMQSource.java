@@ -45,6 +45,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private static final int WATER_MARK_HIGH = 8000;
 
+    private static final long DELAY_INTERVAL_ON_EXCEPTION = 3000;
+
     private ConcurrentHashMap<MessageQueue, Long> suspendedQueues = new ConcurrentHashMap<MessageQueue, Long>();
 
     private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>> cache = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>>();
@@ -313,6 +315,10 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         pullThreadPool.submit(new FlumePullTask(consumer, flumePullRequest));
     }
 
+    private void executePullRequest(FlumePullRequest flumePullRequest, long delayInterval) {
+        pullThreadPool.schedule(new FlumePullTask(consumer, flumePullRequest), delayInterval, TimeUnit.MILLISECONDS);
+    }
+
     private void resume() {
         if (suspendedQueues.isEmpty()) {
             return;
@@ -406,7 +412,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             if (countOfBufferedMessages() > WATER_MARK_HIGH) {
                 suspendedQueues.put(messageQueue, flumePullRequest.getOffset());
             } else {
-                executePullRequest(request);
+                executePullRequest(request, DELAY_INTERVAL_ON_EXCEPTION);
             }
         }
     }
