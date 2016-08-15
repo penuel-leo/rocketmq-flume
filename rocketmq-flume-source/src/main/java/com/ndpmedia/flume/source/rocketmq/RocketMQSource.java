@@ -139,13 +139,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private void updateOffset() {
         OffsetStore offsetStore = consumer.getOffsetStore();
-        Set<MessageQueue> updated = new HashSet<MessageQueue>();
         // calculate offsets according to consuming windows.
         for (ConcurrentHashMap.Entry<MessageQueue, ConcurrentSkipListSet<Long>> entry : windows.entrySet()) {
+            boolean updated = false;
             while (!entry.getValue().isEmpty()) {
-
                 // Avoid override reset offset.
-                updated.removeAll(resetOffsetTable.keySet());
                 if (resetOffsetTable.containsKey(entry.getKey())) {
                     break;
                 }
@@ -156,14 +154,30 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                 } else if (offset + 1 == entry.getValue().first()) {
                     entry.getValue().pollFirst();
                     offsetStore.updateOffset(entry.getKey(), offset + 1, true);
-                    updated.add(entry.getKey());
+                    updated = true;
                 } else {
                     break;
                 }
-
             }
+
+            // Update offset to broker.
+            if (updated) {
+                for (int i = 0; i < 5; i++) {
+                    try {
+
+                        if (resetOffsetTable.containsKey(entry.getKey())) {
+                            break;
+                        }
+
+                        offsetStore.persist(entry.getKey());
+                        break;
+                    } catch (Throwable e) {
+                        LOG.error("Update offset failed");
+                    }
+                }
+            }
+
         }
-        offsetStore.persistAll(updated);
     }
 
     @Override
