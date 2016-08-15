@@ -1,5 +1,6 @@
 package com.ndpmedia.flume.source.rocketmq;
 
+import com.alibaba.rocketmq.client.ResetOffsetCallback;
 import com.alibaba.rocketmq.client.consumer.*;
 import com.alibaba.rocketmq.client.consumer.store.OffsetStore;
 import com.alibaba.rocketmq.client.consumer.store.ReadOffsetType;
@@ -52,6 +53,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>> cache = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<MessageExt>>();
     private final ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>> windows = new ConcurrentHashMap<MessageQueue, ConcurrentSkipListSet<Long>>();
     private final ScheduledExecutorService pullThreadPool = Executors.newSingleThreadScheduledExecutor();
+    private final ConcurrentHashMap<MessageQueue, Long> resetOffsetTable = new ConcurrentHashMap<>();
 
     @Override
     public void configure(Context context) {
@@ -60,6 +62,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         extra = context.getString(RocketMQSourceConstant.EXTRA, null);
         pullBatchSize = context.getInteger(RocketMQSourceConstant.PULL_BATCH_SIZE, RocketMQSourceConstant.DEFAULT_PULL_BATCH_SIZE);
         consumer = RocketMQSourceUtil.getConsumerInstance(context);
+        consumer.setResetOffsetCallback(new FlumeResetOffsetCallback(consumer));
     }
 
     private boolean hasPendingMessage() {
@@ -140,6 +143,12 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         // calculate offsets according to consuming windows.
         for (ConcurrentHashMap.Entry<MessageQueue, ConcurrentSkipListSet<Long>> entry : windows.entrySet()) {
             while (!entry.getValue().isEmpty()) {
+
+                // Avoid override reset offset.
+                updated.removeAll(resetOffsetTable.keySet());
+                if (resetOffsetTable.containsKey(entry.getKey())) {
+                    break;
+                }
 
                 long offset = offsetStore.readOffset(entry.getKey(), ReadOffsetType.MEMORY_FIRST_THEN_STORE);
                 if (offset + 1 > entry.getValue().first()) {
@@ -267,7 +276,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     private class FlumePullRequest {
         private final MessageQueue messageQueue;
         private final String subscription;
-        private final long offset;
+        private long offset;
         private final int batchSize;
 
         FlumePullRequest(MessageQueue messageQueue, String subscription, long offset, int batchSize) {
@@ -287,6 +296,10 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         long getOffset() {
             return offset;
+        }
+
+        void setOffset(long offset) {
+            this.offset = offset;
         }
 
         int getBatchSize() {
@@ -331,11 +344,23 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     }
 
     private void executePullRequest(FlumePullRequest flumePullRequest) {
-        pullThreadPool.submit(new FlumePullTask(consumer, flumePullRequest));
+        executePullRequest(flumePullRequest, 0);
     }
 
-    private void executePullRequest(FlumePullRequest flumePullRequest, long delayInterval) {
-        pullThreadPool.schedule(new FlumePullTask(consumer, flumePullRequest), delayInterval, TimeUnit.MILLISECONDS);
+    private void executePullRequest(FlumePullRequest flumePullRequest, long delayIntervalInMilliSeconds) {
+
+        if (resetOffsetTable.containsKey(flumePullRequest.getMessageQueue())) {
+            flumePullRequest.setOffset(resetOffsetTable.get(flumePullRequest.getMessageQueue()));
+
+            // Remove after use.
+            resetOffsetTable.remove(flumePullRequest.getMessageQueue());
+        }
+
+        if (delayIntervalInMilliSeconds > 0) {
+            pullThreadPool.schedule(new FlumePullTask(consumer, flumePullRequest), delayIntervalInMilliSeconds, TimeUnit.MILLISECONDS);
+        } else {
+            pullThreadPool.submit(new FlumePullTask(consumer, flumePullRequest));
+        }
     }
 
     private void resume() {
@@ -484,6 +509,43 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         @Override
         public int compare(MessageExt lhs, MessageExt rhs) {
             return Long.compare(lhs.getQueueOffset(), rhs.getQueueOffset());
+        }
+    }
+
+    private class FlumeResetOffsetCallback implements ResetOffsetCallback {
+
+        private final DefaultMQPullConsumer defaultMQPullConsumer;
+
+        private FlumeResetOffsetCallback(DefaultMQPullConsumer defaultMQPullConsumer) {
+            this.defaultMQPullConsumer = defaultMQPullConsumer;
+        }
+
+        @Override
+        public void resetOffset(String topic, String group, Map<MessageQueue, Long> offsetTable) {
+
+            for (Map.Entry<MessageQueue, Long> next : offsetTable.entrySet()) {
+                resetOffsetTable.put(next.getKey(), next.getValue());
+
+                if (windows.containsKey(next.getKey())) {
+                    windows.remove(next.getKey());
+                }
+
+                if (cache.containsKey(next.getKey())) {
+                    cache.remove(next.getKey());
+                }
+            }
+
+            /*
+             * Updating offsets to broker might be time consuming.
+             */
+            for (Map.Entry<MessageQueue, Long> next : offsetTable.entrySet()) {
+                try {
+                    defaultMQPullConsumer.getOffsetStore().updateOffset(next.getKey(), next.getValue(), false);
+                    defaultMQPullConsumer.getOffsetStore().persist(next.getKey());
+                } catch (Throwable e) {
+                    LOG.error("Failed to update offset to broker while resetting offset");
+                }
+            }
         }
     }
 
