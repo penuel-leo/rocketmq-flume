@@ -546,6 +546,13 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     LOG.error("Failed to update offset to broker while resetting offset");
                 }
             }
+
+            if (LOG.isInfoEnabled()) {
+                LOG.info("ResetOffset as follows");
+                for (Map.Entry<MessageQueue, Long> next : offsetTable.entrySet()) {
+                    LOG.info("Queue: {}, New offset: {}", next.getKey().toString(), next.getValue());
+                }
+            }
         }
     }
 
