@@ -192,7 +192,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     throw new IllegalStateException("Should not happen");
                 }
             } else {
-                LOG.info("No pending messages to process");
+                LOG.debug("No pending messages to process, going to backoff");
                 return Status.BACKOFF;
             }
         } catch (Exception e) {
