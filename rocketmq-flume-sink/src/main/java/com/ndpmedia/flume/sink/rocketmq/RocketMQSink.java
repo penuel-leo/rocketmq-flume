@@ -110,7 +110,6 @@ public class RocketMQSink extends AbstractSink implements Configurable {
             }
 
             if (events.isEmpty()) {
-                LOG.info("No matched events. Has regex filter: {}", null != ALLOW_PATTERN || null != DENY_PATTERN);
                 tx.commit();
                 return Status.READY;
             } else {
