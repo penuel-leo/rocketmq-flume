@@ -41,6 +41,11 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
     private boolean asyn = true;//是否异步发送
 
+    /**
+     * Maximum number of events to handle in a transaction.
+     */
+    private static final int BATCH_SIZE = 256;
+
     private static Pattern ALLOW_PATTERN = null;
 
     private static Pattern DENY_PATTERN = null;
@@ -82,7 +87,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
             tx.begin();
             List<Event> events = new ArrayList<>();
 
-            while (true) {
+            for (int i = 0; i < BATCH_SIZE; i++) {
                 Event event = channel.take();
                 if (null == event || null == event.getBody() || 0 == event.getBody().length) {
                     break;
@@ -105,6 +110,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
             }
 
             if (events.isEmpty()) {
+                LOG.info("No matched events. Has regex filter: {}", null != ALLOW_PATTERN || null != DENY_PATTERN);
                 tx.commit();
                 return Status.READY;
             } else {
