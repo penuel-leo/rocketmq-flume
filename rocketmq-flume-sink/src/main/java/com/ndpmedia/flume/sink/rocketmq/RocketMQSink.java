@@ -41,8 +41,6 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
     private boolean asyn = true;//是否异步发送
 
-    private static final int BATCH_SIZE = 128;
-
     private static Pattern ALLOW_PATTERN = null;
 
     private static Pattern DENY_PATTERN = null;
@@ -84,7 +82,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
             tx.begin();
             List<Event> events = new ArrayList<>();
 
-            for (int i = 0; i < BATCH_SIZE; i++) {
+            while (true) {
                 Event event = channel.take();
                 if (null == event || null == event.getBody() || 0 == event.getBody().length) {
                     break;
