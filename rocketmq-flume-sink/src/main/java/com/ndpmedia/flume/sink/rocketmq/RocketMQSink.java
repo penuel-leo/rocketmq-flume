@@ -111,7 +111,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
             if (events.isEmpty()) {
                 tx.commit();
-                return Status.READY;
+                return Status.BACKOFF;
             } else {
                 if (asyn) { // send messages asynchronously
                     final CountDownLatch countDownLatch = new CountDownLatch(events.size());
