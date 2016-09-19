@@ -104,8 +104,12 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                             LOG.error("Flow control map should contain the pull request under flow control");
                             flumePullRequest = new FlumePullRequest(messageQueue, tag, processQueue.getMaxOffset(),
                                     pullBatchSize);
+                            LOG.warn("Resume pulling. Pulling from offset: {}", processQueue.getMaxOffset());
+                        } else {
+                            LOG.warn("Resume pulling from flow control state. Message Queue: {}", messageQueue);
                         }
                         executePullRequest(flumePullRequest);
+                        flowControlMap.remove(messageQueue);
                     }
 
                     return Status.READY;
@@ -113,9 +117,16 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     if (!processQueue.isPullAlive()) {
                         LOG.warn("Pulling [{}] has been inactive for more than 10 minutes", messageQueue);
                         processQueue.refreshLastPullTimestamp();
-                        FlumePullRequest flumePullRequest = new FlumePullRequest(messageQueue, tag,
-                                processQueue.getAckOffset(), pullBatchSize);
+                        FlumePullRequest flumePullRequest = flowControlMap.get(messageQueue);
+                        if (null == flumePullRequest) {
+                            flumePullRequest = new FlumePullRequest(messageQueue, tag, processQueue.getAckOffset(),
+                                    pullBatchSize);
+                            LOG.warn("Resume pulling from inactive state. Message Queue: {}", messageQueue);
+                        } else {
+                            LOG.warn("Resume pulling from flow control state. Message Queue: {}", messageQueue);
+                        }
                         executePullRequest(flumePullRequest);
+                        flowControlMap.remove(messageQueue);
                     }
                 }
             }
@@ -159,10 +170,26 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                         }
 
                         if (!next.getValue().isPullAlive()) {
-                            LOG.warn("Message Queue: [{}] has not been pulled for 10 minutes. Resume it now.",
+
+                            // Check if we can resume.
+                            if (flowControlMap.containsKey(next.getKey())) {
+                                if (processMap.get(next.getKey()).needFlowControl()) {
+                                    LOG.error("Business Code Is Buggy: Consuming too slow");
+                                    continue;
+                                }
+                            }
+
+                            LOG.warn("Message Queue: [{}] has not been pulled for 10 minutes. Try to resume it now.",
                                     next.getKey());
-                            FlumePullRequest flumePullRequest = new FlumePullRequest(next.getKey(), tag,
-                                    next.getValue().getAckOffset(), pullBatchSize);
+                            FlumePullRequest flumePullRequest = flowControlMap.get(next.getKey());
+                            if (null == flumePullRequest) {
+                                flumePullRequest = new FlumePullRequest(next.getKey(), tag,
+                                        next.getValue().getAckOffset(), pullBatchSize);
+                                LOG.warn("Resume from inactive state. Message Queue: {}", next.getKey());
+                            } else {
+                                LOG.warn("Resume from flow control state. Message Queue: {}", next.getKey());
+                                flowControlMap.remove(next.getKey());
+                            }
                             executePullRequest(flumePullRequest);
                         }
                     }
