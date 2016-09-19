@@ -204,7 +204,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         consumer.shutdown();
         executorService.shutdown();
         super.stop();
-        LOG.warn("RocketMQSource stop consumer... ");
+        LOG.info("RocketMQSource stop consumer... ");
     }
 
     private class FlumeMessageQueueListener implements MessageQueueListener {
@@ -265,7 +265,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             }
 
             if (logRebalanceEvent) {
-                LOG.warn("Rebalance just happened!!!");
+                LOG.debug("Rebalance just happened!!!");
                 LOG.debug("Current consuming the following message queues:");
                 int index = 0;
                 for (MessageQueue messageQueue : mqDivided) {
