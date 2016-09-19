@@ -128,7 +128,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     @Override
     public synchronized void start() {
         try {
-            LOG.warn("RocketMQSource start consumer... ");
+            LOG.info("RocketMQSource start consumer... ");
             consumer.registerMessageQueueListener(topic, new FlumeMessageQueueListener(consumer));
             consumer.start();
             registerWatchDog();
