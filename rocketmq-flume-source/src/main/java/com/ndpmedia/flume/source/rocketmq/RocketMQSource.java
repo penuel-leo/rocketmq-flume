@@ -80,31 +80,41 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         try {
 
             for (Map.Entry<MessageQueue, ProcessQueue> entry : processMap.entrySet()) {
-                if (entry.getValue().hasPendingMessage()) {
+                MessageQueue messageQueue = entry.getKey();
+                ProcessQueue processQueue = entry.getValue();
+                if (processQueue.hasPendingMessage()) {
                     List<Event> events = new ArrayList<>();
-                    List<MessageExt> messageLists = entry.getValue().peek(CONSUME_BATCH_SIZE);
+                    List<MessageExt> messageLists = processQueue.peek(CONSUME_BATCH_SIZE);
                     for (MessageExt message : messageLists) {
                         events.add(wrap(message));
                     }
                     getChannelProcessor().processEventBatch(events);
-                    boolean throttling = entry.getValue().needFlowControl();
-                    entry.getValue().ack(messageLists);
+                    boolean throttling = processQueue.needFlowControl();
+                    processQueue.ack(messageLists);
 
                     if (!messageLists.isEmpty()) {
-                        consumer.getOffsetStore().updateOffset(entry.getKey(), entry.getValue().getAckOffset(), true);
+                        consumer.getOffsetStore().updateOffset(messageQueue, processQueue.getAckOffset(), true);
                     }
 
-                    if (throttling && !entry.getValue().needFlowControl()) {
-                        FlumePullRequest flumePullRequest = flowControlMap.get(entry.getKey());
+                    if (throttling && !processQueue.needFlowControl()) {
+                        FlumePullRequest flumePullRequest = flowControlMap.get(messageQueue);
                         if (null == flumePullRequest) {
                             LOG.error("Flow control map should contain the pull request under flow control");
-                            flumePullRequest = new FlumePullRequest(entry.getKey(), tag,
-                                    entry.getValue().getMaxOffset(), pullBatchSize);
+                            flumePullRequest = new FlumePullRequest(messageQueue, tag, processQueue.getMaxOffset(),
+                                    pullBatchSize);
                         }
                         executePullRequest(flumePullRequest);
                     }
 
                     return Status.READY;
+                } else {
+                    if (!processQueue.isPullAlive()) {
+                        LOG.warn("Pulling [{}] has been inactive for more than 10 minutes", messageQueue);
+                        processQueue.refreshLastPullTimestamp();
+                        FlumePullRequest flumePullRequest = new FlumePullRequest(messageQueue, tag,
+                                processQueue.getAckOffset(), pullBatchSize);
+                        executePullRequest(flumePullRequest);
+                    }
                 }
             }
 
