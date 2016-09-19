@@ -15,7 +15,7 @@ public class ProcessQueue {
 
     private static final long FLOW_CONTROL_CONSUMING_SPAN_THRESHOLD = 5000;
 
-    private long lastPullTime = System.currentTimeMillis();
+    private long lastPullTimestamp = System.currentTimeMillis();
     private boolean dropped;
     private final MessageQueue messageQueue;
     private final TreeMap<Long, MessageExt> treeMap;
@@ -23,6 +23,7 @@ public class ProcessQueue {
     private final ReadWriteLock lock;
     private volatile long maxOffset;
     private volatile long ackOffset;
+
     private volatile boolean consumeOffsetPersisted;
 
 
@@ -53,20 +54,22 @@ public class ProcessQueue {
         try {
             for (MessageExt message : messageList) {
                 treeMap.remove(message.getQueueOffset());
-                if (message.getQueueOffset() == ackOffset + 1) {
+                window.add(message.getQueueOffset());
+            }
+
+            while (true) {
+                if (window.isEmpty()) {
+                    break;
+                }
+
+                if (window.first() == ackOffset + 1) {
                     ackOffset++;
+                    window.pollFirst();
                     consumeOffsetPersisted = false;
+                } else if (window.first() <= ackOffset) {
+                    window.pollFirst();
                 } else {
-                    window.add(message.getQueueOffset());
-                    while (true) {
-                        if (window.first() == ackOffset + 1) {
-                            ackOffset++;
-                            window.remove(ackOffset);
-                            consumeOffsetPersisted = false;
-                        } else {
-                            break;
-                        }
-                    }
+                    break;
                 }
             }
         } finally {
@@ -99,16 +102,24 @@ public class ProcessQueue {
     }
 
     public boolean needFlowControl() {
-        return treeMap.size() > FLOW_CONTROL_ACCUMULATION_THRESHOLD
-               || maxOffset - ackOffset > FLOW_CONTROL_CONSUMING_SPAN_THRESHOLD;
+        return treeMap.size() >= FLOW_CONTROL_ACCUMULATION_THRESHOLD
+               || consumingWindowSpan() >= FLOW_CONTROL_CONSUMING_SPAN_THRESHOLD;
     }
 
-    public void refreshLastPullTime() {
-        lastPullTime = System.currentTimeMillis();
+    public long consumingWindowSpan() {
+        if (window.isEmpty()) {
+            return 0;
+        }
+
+        return window.last() - window.first();
+    }
+
+    public void refreshLastPullTimestamp() {
+        lastPullTimestamp = System.currentTimeMillis();
     }
 
     public boolean isPullAlive() {
-        return System.currentTimeMillis() - lastPullTime < INTERVAL_10MIN_IN_MS;
+        return System.currentTimeMillis() - lastPullTimestamp < INTERVAL_10MIN_IN_MS;
     }
 
     public boolean isDropped() {
@@ -124,7 +135,12 @@ public class ProcessQueue {
     }
 
     public void setAckOffset(long ackOffset) {
-        this.ackOffset = ackOffset;
+        lock.writeLock().lock();
+        try {
+            this.ackOffset = ackOffset;
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     public boolean isConsumeOffsetPersisted() {
@@ -133,5 +149,9 @@ public class ProcessQueue {
 
     public long getMaxOffset() {
         return maxOffset;
+    }
+
+    public MessageQueue getMessageQueue() {
+        return messageQueue;
     }
 }

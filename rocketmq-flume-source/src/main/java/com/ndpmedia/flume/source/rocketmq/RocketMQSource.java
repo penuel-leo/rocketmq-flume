@@ -186,6 +186,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     public synchronized void stop() {
         // 停止Producer
         consumer.shutdown();
+        executorService.shutdown();
         super.stop();
         LOG.warn("RocketMQSource stop consumer... ");
     }
@@ -221,18 +222,22 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     logRebalanceEvent = true;
 
                     long consumeOffset = -1;
-                    for (int i = 0; i < 5; ) {
+                    int i = 0;
+                    Throwable cause = null;
+                    for (; i < 5; i++) {
                         try {
                             consumeOffset = pullConsumer.fetchConsumeOffset(messageQueue, true);
+                            processMap.get(messageQueue).setAckOffset(consumeOffset < 0 ? 0 : consumeOffset);
                             break;
                         } catch (Throwable e) {
-                            ++i;
-                            LOG.error("Failed to fetchConsumeOffset {} time(s)", i);
-                            LOG.error("Exception Stack Trace", e);
+                            cause = e;
                         }
                     }
 
-                    processMap.get(messageQueue).setAckOffset(consumeOffset < 0 ? 0 : consumeOffset);
+                    if (i >= 5) {
+                        LOG.error("Failed to fetchConsumeOffset after attempting {} time(s)", i);
+                        LOG.error("Exception Stack Trace", cause);
+                    }
 
                     FlumePullRequest request = new FlumePullRequest(messageQueue, tag,
                             consumeOffset < 0 ? 0 : consumeOffset, // consume offset
@@ -364,16 +369,17 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         public void onSuccess(PullResult pullResult) {
             try {
                 LOG.debug("Pull success, begin to process pull result. message queue: {}", messageQueue.toString());
+                ProcessQueue processQueue = processMap.get(messageQueue);
+                if (null == processQueue || processQueue.isDropped()) {
+                    return;
+                }
+
+                // Refresh last pull timestamp.
+                processQueue.refreshLastPullTimestamp();
+
                 switch (pullResult.getPullStatus()) {
                     case FOUND:
-                        ProcessQueue processQueue = processMap.get(messageQueue);
-                        if (null == processQueue || processQueue.isDropped()) {
-                            return;
-                        }
-
-                        processQueue.refreshLastPullTime();
                         processQueue.putMessages(pullResult.getMsgFoundList());
-
                         nextBeginOffset = pullResult.getNextBeginOffset();
                         break;
 
@@ -432,6 +438,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         @Override
         public void onException(Throwable e) {
             LOG.error("Pull failed", e);
+            ProcessQueue processQueue = processMap.get(messageQueue);
+            if (null != processQueue) {
+                processQueue.refreshLastPullTimestamp();
+            }
+
             FlumePullRequest request = new FlumePullRequest(messageQueue, tag, flumePullRequest.getOffset(),
                     pullBatchSize);
             executePullRequest(request, DELAY_INTERVAL_ON_EXCEPTION);
@@ -460,6 +471,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                 try {
                     defaultMQPullConsumer.getOffsetStore().updateOffset(next.getKey(), next.getValue(), false);
                     defaultMQPullConsumer.getOffsetStore().persist(next.getKey());
+                    processMap.get(next.getKey()).setAckOffset(next.getValue());
                 } catch (Throwable e) {
                     LOG.error("Failed to update offset to broker while resetting offset");
                 }
