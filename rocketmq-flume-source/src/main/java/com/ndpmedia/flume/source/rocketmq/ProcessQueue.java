@@ -2,12 +2,16 @@ package com.ndpmedia.flume.source.rocketmq;
 
 import com.alibaba.rocketmq.common.message.MessageExt;
 import com.alibaba.rocketmq.common.message.MessageQueue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class ProcessQueue {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ProcessQueue.class);
 
     private static final long INTERVAL_10MIN_IN_MS = 10 * 60 * 1000L;
 
@@ -36,6 +40,10 @@ public class ProcessQueue {
     }
 
     public void putMessages(List<MessageExt> messageList) {
+        if (null == messageList || messageList.isEmpty()) {
+            return;
+        }
+
         lock.writeLock().lock();
         try {
             for (MessageExt message : messageList) {
@@ -46,10 +54,15 @@ public class ProcessQueue {
             }
         } finally {
             lock.writeLock().unlock();
+            LOGGER.debug("Pulled {} messages", messageList.size());
         }
     }
 
     public void ack(List<MessageExt> messageList) {
+        if (null == messageList || messageList.isEmpty()) {
+            return;
+        }
+
         lock.writeLock().lock();
         try {
             for (MessageExt message : messageList) {
@@ -74,6 +87,7 @@ public class ProcessQueue {
             }
         } finally {
             lock.writeLock().unlock();
+            LOGGER.debug("Acknowledged {} messages", messageList.size());
         }
     }
 

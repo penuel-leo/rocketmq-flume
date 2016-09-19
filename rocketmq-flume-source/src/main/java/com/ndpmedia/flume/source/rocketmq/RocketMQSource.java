@@ -223,6 +223,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             for (MessageQueue messageQueue : previous) {
                 if (!mqDivided.contains(messageQueue)) {
                     processMap.get(messageQueue).setDropped(true);
+                    processMap.remove(messageQueue);
                     logRebalanceEvent = true;
                     LOG.info("Remove message queue: {}", messageQueue.toString());
                 }
@@ -449,6 +450,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     executePullRequest(request);
                 } else {
                     flowControlMap.put(messageQueue, request);
+                    LOG.warn("Flow control enforced. Message Queue: {}", messageQueue);
                 }
             }
         }
