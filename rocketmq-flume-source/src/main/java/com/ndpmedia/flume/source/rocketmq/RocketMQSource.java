@@ -90,7 +90,12 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     for (MessageExt message : messageLists) {
                         events.add(wrap(message));
                     }
+                    long start = System.currentTimeMillis();
                     getChannelProcessor().processEventBatch(events);
+
+                    LOG.debug("It takes {}ms to process {} events.", (System.currentTimeMillis() - start),
+                            events.size());
+
                     boolean throttling = processQueue.needFlowControl();
                     processQueue.ack(messageLists);
 
