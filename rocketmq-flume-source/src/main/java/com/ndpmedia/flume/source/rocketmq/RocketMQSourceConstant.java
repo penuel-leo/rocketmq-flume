@@ -29,5 +29,5 @@ public class RocketMQSourceConstant {
     public static final String DEFAULT_TAG = "*";
     public static final String DEFAULT_MESSAGE_MODEL = "CLUSTERING";
     public static final String DEFAULT_CONSUME_FROM_WHERE = "CONSUME_FROM_LAST_OFFSET";
-    public static final int DEFAULT_PULL_BATCH_SIZE = 128;
+    public static final int DEFAULT_PULL_BATCH_SIZE = 1024;
 }
