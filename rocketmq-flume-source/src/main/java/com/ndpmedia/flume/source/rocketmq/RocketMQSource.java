@@ -6,6 +6,7 @@ import com.alibaba.rocketmq.client.consumer.MessageQueueListener;
 import com.alibaba.rocketmq.client.consumer.PullCallback;
 import com.alibaba.rocketmq.client.consumer.PullResult;
 import com.alibaba.rocketmq.client.exception.MQClientException;
+import com.alibaba.rocketmq.common.ThreadFactoryImpl;
 import com.alibaba.rocketmq.common.message.MessageExt;
 import com.alibaba.rocketmq.common.message.MessageQueue;
 import org.apache.flume.Context;
@@ -47,7 +48,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private static final long DELAY_INTERVAL_ON_EXCEPTION = 3000;
 
-    private final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService executorService =
+            Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("RocketMQFlumeSourceThread_"));
 
     private final ConcurrentHashMap<MessageQueue, Long> resetOffsetTable = new ConcurrentHashMap<>();
 
