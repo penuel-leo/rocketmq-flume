@@ -70,6 +70,10 @@ public class ProcessQueue {
                 window.add(message.getQueueOffset());
             }
 
+            if (ackOffset <= 0) {
+                ackOffset = window.first() - 1;
+            }
+
             while (true) {
                 if (window.isEmpty()) {
                     break;
@@ -87,7 +91,11 @@ public class ProcessQueue {
             }
         } finally {
             lock.writeLock().unlock();
-            LOGGER.debug("Acknowledged {} messages", messageList.size());
+            LOGGER.debug("Acknowledged {} messages. Accumulation: {}, Flow Control: {}, Ack: {}",
+                    messageList.size(),
+                    treeMap.size(),
+                    needFlowControl(),
+                    ackOffset);
         }
     }
 
@@ -117,7 +125,7 @@ public class ProcessQueue {
 
     public boolean needFlowControl() {
         return treeMap.size() >= FLOW_CONTROL_ACCUMULATION_THRESHOLD
-               || consumingWindowSpan() >= FLOW_CONTROL_CONSUMING_SPAN_THRESHOLD;
+                || consumingWindowSpan() >= FLOW_CONTROL_CONSUMING_SPAN_THRESHOLD;
     }
 
     public long consumingWindowSpan() {

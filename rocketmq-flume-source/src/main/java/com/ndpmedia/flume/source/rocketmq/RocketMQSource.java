@@ -279,6 +279,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                         try {
                             consumeOffset = pullConsumer.fetchConsumeOffset(messageQueue, true);
                             processMap.get(messageQueue).setAckOffset(consumeOffset < 0 ? 0 : consumeOffset);
+                            LOG.info("Message Queue: {} --> Consuming from: {}", messageQueue, consumeOffset);
                             break;
                         } catch (Throwable e) {
                             cause = e;
