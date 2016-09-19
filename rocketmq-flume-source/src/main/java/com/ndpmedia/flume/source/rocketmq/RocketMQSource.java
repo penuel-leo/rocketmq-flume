@@ -141,10 +141,14 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     for (Map.Entry<MessageQueue, ProcessQueue> next : processMap.entrySet()) {
                         if (next.getValue().isDropped()) {
                             processMap.remove(next.getKey());
+                            LOG.info("Message Queue: [{}] has been marked dropped, remove it from process map.",
+                                    next.getKey());
                             continue;
                         }
 
                         if (!next.getValue().isPullAlive()) {
+                            LOG.warn("Message Queue: [{}] has not been pulled for 10 minutes. Resume it now.",
+                                    next.getKey());
                             FlumePullRequest flumePullRequest = new FlumePullRequest(next.getKey(), tag,
                                     next.getValue().getAckOffset(), pullBatchSize);
                             executePullRequest(flumePullRequest);
@@ -169,6 +173,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                         if (!next.getValue().isConsumeOffsetPersisted()) {
                             try {
                                 consumer.getOffsetStore().persist(next.getKey());
+                                LOG.debug("Offset Persisted. Message Queue: {}, Consume Offset: {}", next.getKey(),
+                                        next.getValue().getAckOffset());
                             } catch (Exception e) {
                                 LOG.warn("Failed to persist consume offset. Message Queue: {}, Offset: {}",
                                         next.getKey(), next.getValue().getAckOffset());
