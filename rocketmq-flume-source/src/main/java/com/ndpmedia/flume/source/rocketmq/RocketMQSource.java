@@ -111,10 +111,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                                     pullBatchSize);
                             LOG.warn("Resume pulling. Pulling from offset: {}", processQueue.getMaxOffset());
                         } else {
+                            flowControlMap.remove(messageQueue);
                             LOG.warn("Resume pulling from flow control state. Message Queue: {}", messageQueue);
                         }
+
                         executePullRequest(flumePullRequest);
-                        flowControlMap.remove(messageQueue);
                     }
 
                     return Status.READY;
@@ -128,10 +129,10 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                                     pullBatchSize);
                             LOG.warn("Resume pulling from inactive state. Message Queue: {}", messageQueue);
                         } else {
+                            flowControlMap.remove(messageQueue);
                             LOG.warn("Resume pulling from flow control state. Message Queue: {}", messageQueue);
                         }
                         executePullRequest(flumePullRequest);
-                        flowControlMap.remove(messageQueue);
                     }
                 }
             }
@@ -490,7 +491,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         @Override
         public void onException(Throwable e) {
-            LOG.error("Pull failed", e);
+            LOG.error("Pull failed.", e);
             ProcessQueue processQueue = processMap.get(messageQueue);
             if (null != processQueue) {
                 processQueue.refreshLastPullTimestamp();

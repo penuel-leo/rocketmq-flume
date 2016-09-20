@@ -133,7 +133,12 @@ public class ProcessQueue {
             return 0;
         }
 
-        return window.last() - window.first();
+        lock.readLock().lock();
+        try {
+            return window.last() - window.first();
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     public void refreshLastPullTimestamp() {
