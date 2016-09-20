@@ -239,7 +239,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     LOG.error("Unexpected exception", e);
                 }
             }
-        }, 300, 300, TimeUnit.SECONDS);
+        }, 60, 60, TimeUnit.SECONDS);
     }
 
     @Override
