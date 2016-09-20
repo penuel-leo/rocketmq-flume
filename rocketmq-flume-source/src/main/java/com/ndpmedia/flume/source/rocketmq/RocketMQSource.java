@@ -24,7 +24,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Implement a pull-based source model.
@@ -55,8 +54,6 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
     private final ConcurrentHashMap<MessageQueue, Long> resetOffsetTable = new ConcurrentHashMap<>();
 
     private final ConcurrentHashMap<MessageQueue, FlumePullRequest> flowControlMap = new ConcurrentHashMap<>();
-
-    private final AtomicLong logIndex = new AtomicLong();
 
     @Override
     public void configure(Context context) {
@@ -141,10 +138,6 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                             flowControlMap.remove(messageQueue);
                             LOG.warn("Resume pulling from flow control state. Message Queue: {}", messageQueue);
                             executePullRequest(flumePullRequest);
-                        }
-                    } else {
-                        if (logIndex.incrementAndGet() % 1024 == 0) {
-                            LOG.debug("Wait till lastPullTimestamp expires 10 minutes threshold");
                         }
                     }
                 }
