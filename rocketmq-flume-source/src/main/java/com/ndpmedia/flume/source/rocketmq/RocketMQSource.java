@@ -126,7 +126,12 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                             flowControlMap.remove(messageQueue);
                             LOG.warn("Resume pulling from flow control state. Message Queue: {}", messageQueue);
                         }
-                        executePullRequest(flumePullRequest);
+
+                        if (!processQueue.isPullAlive()) {
+                            processQueue.refreshLastPullTimestamp();
+                            executePullRequest(flumePullRequest);
+                        }
+
                     } else if (flowControlMap.containsKey(messageQueue)){
                         FlumePullRequest flumePullRequest = flowControlMap.get(messageQueue);
                         if (null != flumePullRequest) {
@@ -199,7 +204,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                                 LOG.warn("Resume from flow control state. Message Queue: {}", next.getKey());
                                 flowControlMap.remove(next.getKey());
                             }
-                            executePullRequest(flumePullRequest);
+
+                            if (!next.getValue().isPullAlive()) {
+                                next.getValue().refreshLastPullTimestamp();
+                                executePullRequest(flumePullRequest);
+                            }
                         }
                     }
                 } catch (Exception e) {

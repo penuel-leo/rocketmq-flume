@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -21,7 +22,7 @@ public class ProcessQueue {
 
     private static final long FLOW_CONTROL_CONSUMING_SPAN_THRESHOLD = 5000;
 
-    private long lastPullTimestamp = System.currentTimeMillis();
+    private AtomicLong lastPullTimestamp = new AtomicLong(System.currentTimeMillis());
     private boolean dropped;
     private final MessageQueue messageQueue;
     private final TreeMap<Long, MessageExt> treeMap;
@@ -156,11 +157,11 @@ public class ProcessQueue {
     }
 
     public void refreshLastPullTimestamp() {
-        lastPullTimestamp = System.currentTimeMillis();
+        lastPullTimestamp.set(System.currentTimeMillis());
     }
 
     public boolean isPullAlive() {
-        return System.currentTimeMillis() - lastPullTimestamp < INTERVAL_10MIN_IN_MS;
+        return System.currentTimeMillis() - lastPullTimestamp.get() < INTERVAL_10MIN_IN_MS;
     }
 
     public boolean isDropped() {
