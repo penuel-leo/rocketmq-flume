@@ -140,6 +140,9 @@ public class ProcessQueue {
             } else {
                 return window.last() - window.first();
             }
+        } catch (NoSuchElementException e) {
+            LOGGER.error("[Bug]", e);
+            return 0;
         } finally {
             lock.readLock().unlock();
         }
