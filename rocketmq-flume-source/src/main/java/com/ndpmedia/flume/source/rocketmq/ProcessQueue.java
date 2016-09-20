@@ -15,7 +15,9 @@ public class ProcessQueue {
 
     private static final long INTERVAL_10MIN_IN_MS = 10 * 60 * 1000L;
 
-    private static final long FLOW_CONTROL_ACCUMULATION_THRESHOLD = 10000;
+    private static final long FLOW_CONTROL_ACCUMULATION_THRESHOLD = 10240;
+
+    private static final long FLOW_CONTROL_RESUME_PULL_THRESHOLD = 1024;
 
     private static final long FLOW_CONTROL_CONSUMING_SPAN_THRESHOLD = 5000;
 
@@ -126,6 +128,11 @@ public class ProcessQueue {
     public boolean needFlowControl() {
         return treeMap.size() >= FLOW_CONTROL_ACCUMULATION_THRESHOLD
                 || consumingWindowSpan() >= FLOW_CONTROL_CONSUMING_SPAN_THRESHOLD;
+    }
+
+    public boolean mayResumePull() {
+        return treeMap.size() <= FLOW_CONTROL_RESUME_PULL_THRESHOLD
+                && consumingWindowSpan() < FLOW_CONTROL_CONSUMING_SPAN_THRESHOLD;
     }
 
     public long consumingWindowSpan() {

@@ -90,36 +90,30 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                     for (MessageExt message : messageLists) {
                         events.add(wrap(message));
                     }
+
                     long start = System.currentTimeMillis();
                     getChannelProcessor().processEventBatch(events);
+                    long end = System.currentTimeMillis();
+                    LOG.debug("It takes {}ms to process {} events.", (end - start), events.size());
 
-                    LOG.debug("It takes {}ms to process {} events.", (System.currentTimeMillis() - start),
-                            events.size());
-
-                    boolean throttling = processQueue.needFlowControl();
                     processQueue.ack(messageLists);
 
                     if (!messageLists.isEmpty()) {
                         consumer.getOffsetStore().updateOffset(messageQueue, processQueue.getAckOffset(), true);
                     }
 
-                    if (throttling && !processQueue.needFlowControl()) {
+                    if (flowControlMap.containsKey(messageQueue) && processQueue.mayResumePull()) {
                         FlumePullRequest flumePullRequest = flowControlMap.get(messageQueue);
-                        if (null == flumePullRequest) {
-                            LOG.error("Flow control map should contain the pull request under flow control");
-                            flumePullRequest = new FlumePullRequest(messageQueue, tag, processQueue.getMaxOffset(),
-                                    pullBatchSize);
-                            LOG.warn("Resume pulling. Pulling from offset: {}", processQueue.getMaxOffset());
-                        } else {
+                        if (null != flumePullRequest) {
                             flowControlMap.remove(messageQueue);
                             LOG.warn("Resume pulling from flow control state. Message Queue: {}", messageQueue);
+                            executePullRequest(flumePullRequest);
                         }
-
-                        executePullRequest(flumePullRequest);
                     }
 
                     return Status.READY;
                 } else {
+                    LOG.debug("ProcessQueue: {} is now empty.");
                     if (!processQueue.isPullAlive()) {
                         LOG.warn("Pulling [{}] has been inactive for more than 10 minutes", messageQueue);
                         processQueue.refreshLastPullTimestamp();
@@ -133,6 +127,15 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
                             LOG.warn("Resume pulling from flow control state. Message Queue: {}", messageQueue);
                         }
                         executePullRequest(flumePullRequest);
+                    } else if (flowControlMap.containsKey(messageQueue)){
+                        FlumePullRequest flumePullRequest = flowControlMap.get(messageQueue);
+                        if (null != flumePullRequest) {
+                            flowControlMap.remove(messageQueue);
+                            LOG.warn("Resume pulling from flow control state. Message Queue: {}", messageQueue);
+                            executePullRequest(flumePullRequest);
+                        }
+                    } else {
+                        LOG.debug("Wait till lastPullTimestamp expires 10 minutes threshold");
                     }
                 }
             }
