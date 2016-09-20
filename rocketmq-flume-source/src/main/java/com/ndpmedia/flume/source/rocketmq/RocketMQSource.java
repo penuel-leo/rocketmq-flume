@@ -500,7 +500,11 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
         @Override
         public void onException(Throwable e) {
-            LOG.error("Pull failed.", e);
+
+            //TODO: Figure out why NPE here.
+            if (!(e instanceof NullPointerException)) {
+                LOG.error("Pull failed.", e);
+            }
             ProcessQueue processQueue = processMap.get(messageQueue);
             if (null != processQueue) {
                 processQueue.refreshLastPullTimestamp();
