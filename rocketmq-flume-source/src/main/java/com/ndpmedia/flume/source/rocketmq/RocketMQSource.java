@@ -113,7 +113,6 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
                     return Status.READY;
                 } else {
-                    LOG.debug("ProcessQueue: {} is now empty.", messageQueue);
                     if (!processQueue.isPullAlive()) {
                         LOG.warn("Pulling [{}] has been inactive for more than 10 minutes", messageQueue);
                         processQueue.refreshLastPullTimestamp();
