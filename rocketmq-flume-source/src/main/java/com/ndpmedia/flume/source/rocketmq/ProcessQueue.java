@@ -94,7 +94,8 @@ public class ProcessQueue {
             }
         } finally {
             lock.writeLock().unlock();
-            LOGGER.debug("Acknowledged {} messages. Accumulation: {}, Flow Control: {}, Ack: {}",
+            LOGGER.debug("Message Queue: {}, acknowledged {} messages. Accumulation: {}, Flow Control: {}, Ack: {}",
+                    messageQueue,
                     messageList.size(),
                     treeMap.size(),
                     needFlowControl(),
