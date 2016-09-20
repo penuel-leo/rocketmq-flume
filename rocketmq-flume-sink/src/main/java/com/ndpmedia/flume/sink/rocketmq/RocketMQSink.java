@@ -44,7 +44,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
     /**
      * Maximum number of events to handle in a transaction.
      */
-    private static final int BATCH_SIZE = 256;
+    private static final int BATCH_SIZE = 32;
 
     private static Pattern ALLOW_PATTERN = null;
 
