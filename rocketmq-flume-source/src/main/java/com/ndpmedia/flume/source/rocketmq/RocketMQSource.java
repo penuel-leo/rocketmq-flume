@@ -508,6 +508,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             ProcessQueue processQueue = processMap.get(messageQueue);
             if (null != processQueue) {
                 processQueue.refreshLastPullTimestamp();
+            } else {
+                return;
             }
 
             FlumePullRequest request = new FlumePullRequest(messageQueue, tag, flumePullRequest.getOffset(),
