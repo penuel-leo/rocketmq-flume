@@ -116,7 +116,6 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                 if (asyn) { // send messages asynchronously
                     final CountDownLatch countDownLatch = new CountDownLatch(events.size());
                     final AtomicBoolean hasError = new AtomicBoolean(false);
-                    final Thread thread = Thread.currentThread();
                     for (Event event : events) {
                         final Message msg = wrap(event);
                         try {
@@ -138,8 +137,6 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                                         LOG.error("sync sending message failed too. Mark this batch as failed");
                                         hasError.set(true);
                                         countDownLatch.countDown();
-                                        LOG.error("Interrupt the main awaiting thread");
-                                        thread.interrupt();
                                     }
                                 }
                             });
@@ -148,7 +145,6 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                             hasError.set(true);
                             LOG.error("Send message failed.");
                         }
-
                     }
 
                     try {
@@ -164,7 +160,11 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                         LOG.error("Awaiting thread was interrupted. Possibly reasons are: 1) Bad network; 2) System shut down;");
                         tx.rollback();
                         return Status.BACKOFF;
+                    } catch (Exception e) {
+                        LOG.error("Unexpected exception on commit/rollback", e);
+                        return Status.BACKOFF;
                     }
+
                 } else { // Send message synchronously
                     try {
                         for (Event event : events) {
