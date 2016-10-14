@@ -2,8 +2,11 @@ package com.ndpmedia.flume.sink.rocketmq;
 
 import com.alibaba.rocketmq.client.exception.MQClientException;
 import com.alibaba.rocketmq.client.producer.MQProducer;
+import com.alibaba.rocketmq.client.producer.MessageQueueSelector;
 import com.alibaba.rocketmq.client.producer.SendCallback;
 import com.alibaba.rocketmq.client.producer.SendResult;
+import com.alibaba.rocketmq.client.producer.selector.Region;
+import com.alibaba.rocketmq.client.producer.selector.SelectMessageQueueByRegion;
 import com.alibaba.rocketmq.common.message.Message;
 import org.apache.flume.*;
 import org.apache.flume.conf.Configurable;
@@ -50,6 +53,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
     private static Pattern DENY_PATTERN = null;
 
+    private MessageQueueSelector messageQueueSelector;
+
     @Override
     public void configure(Context context) {
         // 获取配置项
@@ -72,6 +77,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
         extra = context.getString(RocketMQSinkConstant.EXTRA, null);
 
         asyn = context.getBoolean(RocketMQSinkConstant.ASYN, true);
+
+        messageQueueSelector = new SelectMessageQueueByRegion(Region.SAME);
 
         if (LOG.isInfoEnabled()) {
             LOG.info("RocketMQSource configure success, topic={},tag={},allow={},deny={},extra={}, asyn={}", topic, tag, allow, deny, extra, asyn);
@@ -119,7 +126,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                     for (Event event : events) {
                         final Message msg = wrap(event);
                         try {
-                            producer.send(msg, new SendCallback() {
+                            producer.send(msg, messageQueueSelector, null, new SendCallback() {
                                 @Override
                                 public void onSuccess(SendResult sendResult) {
                                     countDownLatch.countDown();
@@ -130,7 +137,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                                 public void onException(Throwable throwable) {
                                     LOG.debug("Send message async throws exception: {}", throwable);
                                     try {
-                                        SendResult result = producer.send(msg);//异步发送失败，会再同步发送一次
+                                        SendResult result = producer.send(msg, messageQueueSelector, null);//异步发送失败，会再同步发送一次
                                         countDownLatch.countDown();
                                         LOG.debug("sync send success. SendResult: {}", result);
                                     } catch (Exception e) {
@@ -168,7 +175,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                 } else { // Send message synchronously
                     try {
                         for (Event event : events) {
-                            SendResult sendResult = producer.send(wrap(event)); //默认失败会重试
+                            SendResult sendResult = producer.send(wrap(event), messageQueueSelector, null); //默认失败会重试
                             LOG.debug("Send OK. SendResult: {}", sendResult);
                         }
                         tx.commit();
