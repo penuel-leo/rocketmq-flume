@@ -18,6 +18,7 @@ public class RocketMQSinkConstant {
     public static final String ALLOW = "allow";
     public static final String DENY = "deny";
     public static final String ASYN = "asyn";
+    public static final String SEND_BATCH_SIZE = "sendBatchSize";
     public static final String NAMESRVADDR = "namesrvAddr";
     public static final String EXTRA = "extra";
 

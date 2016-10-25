@@ -54,7 +54,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
     /**
      * Maximum number of events to handle in a transaction.
      */
-    private static final int BATCH_SIZE = 128;
+    private int batchSize;
 
     private static Pattern ALLOW_PATTERN = null;
 
@@ -85,6 +85,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
         asyn = context.getBoolean(RocketMQSinkConstant.ASYN, true);
 
+        batchSize = context.getInteger(RocketMQSinkConstant.SEND_BATCH_SIZE, 128);
+
         messageQueueSelector = new SelectMessageQueueByRegion(Region.SAME);
 
         if (LOG.isInfoEnabled()) {
@@ -101,7 +103,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
             tx.begin();
             List<Event> events = new ArrayList<>();
 
-            for (int i = 0; i < BATCH_SIZE; i++) {
+            for (int i = 0; i < batchSize; i++) {
                 Event event = channel.take();
                 if (null == event || null == event.getBody() || 0 == event.getBody().length) {
                     break;
