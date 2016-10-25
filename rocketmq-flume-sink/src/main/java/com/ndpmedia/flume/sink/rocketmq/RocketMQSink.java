@@ -130,7 +130,9 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                 LOG.info("No qualified events. Backing off.");
                 return Status.BACKOFF;
             } else {
+                LOG.info("Begin to process {} events", events.size());
                 if (asyn) { // send messages asynchronously
+                    LOG.debug("Send in async mode");
                     final CountDownLatch countDownLatch = new CountDownLatch(events.size());
                     final AtomicInteger successCount = new AtomicInteger();
                     for (Event event : events) {
@@ -147,11 +149,12 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                                 @Override
                                 public void onException(Throwable throwable) {
                                     LOG.debug("Send message async throws exception: {}", throwable);
+                                    LOG.debug("Trying sync mode");
                                     try {
                                         SendResult result = producer.send(msg, messageQueueSelector, null);//异步发送失败，会再同步发送一次
                                         successCount.incrementAndGet();
                                         countDownLatch.countDown();
-                                        LOG.debug("sync send success. SendResult: {}", result);
+                                        LOG.debug("sync send OK. SendResult: {}", result);
                                     } catch (Exception e) {
                                         LOG.error("sync sending message failed too. Mark this batch as failed");
                                         // Fail fast.
@@ -162,7 +165,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                         } catch (Exception e) {
                             // Fail fast.
                             drainCountDownLatch(countDownLatch);
-                            LOG.error("Send message failed.");
+                            LOG.error("Sending messages failed; Mark processing this batch as failure");
                         }
                     }
 
@@ -174,7 +177,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                             return Status.READY;
                         } else {
                             tx.rollback();
-                            LOG.warn("Transaction rolls back.");
+                            LOG.warn("Transaction rolled back.");
                             return Status.BACKOFF;
                         }
                     } catch (InterruptedException e) {
@@ -187,6 +190,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                     }
 
                 } else { // Send message synchronously
+                    LOG.debug("Send in sync mode");
                     try {
                         for (Event event : events) {
                             SendResult sendResult = producer.send(wrap(event), messageQueueSelector, null); //默认失败会重试
