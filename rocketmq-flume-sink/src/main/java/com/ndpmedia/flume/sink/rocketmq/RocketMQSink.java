@@ -2,11 +2,8 @@ package com.ndpmedia.flume.sink.rocketmq;
 
 import com.alibaba.rocketmq.client.exception.MQClientException;
 import com.alibaba.rocketmq.client.producer.MQProducer;
-import com.alibaba.rocketmq.client.producer.MessageQueueSelector;
 import com.alibaba.rocketmq.client.producer.SendCallback;
 import com.alibaba.rocketmq.client.producer.SendResult;
-import com.alibaba.rocketmq.client.producer.selector.Region;
-import com.alibaba.rocketmq.client.producer.selector.SelectMessageQueueByRegion;
 import com.alibaba.rocketmq.common.message.Message;
 import org.apache.flume.*;
 import org.apache.flume.conf.Configurable;
@@ -44,10 +41,12 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
     private boolean asyn = true;//是否异步发送
 
+    private static final int MINIMUM_AWAIT_TIME_IN_SECONDS = 15;
+
     /**
      * Maximum number of events to handle in a transaction.
      */
-    private static final int BATCH_SIZE = 32;
+    private static final int BATCH_SIZE = 128;
 
     private static Pattern ALLOW_PATTERN = null;
 
@@ -118,17 +117,19 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
             if (events.isEmpty()) {
                 tx.commit();
+                LOG.info("No qualified events. Backing off.");
                 return Status.BACKOFF;
             } else {
                 if (asyn) { // send messages asynchronously
                     final CountDownLatch countDownLatch = new CountDownLatch(events.size());
-                    final AtomicBoolean hasError = new AtomicBoolean(false);
+                    final AtomicInteger successCount = new AtomicInteger();
                     for (Event event : events) {
                         final Message msg = wrap(event);
                         try {
                             producer.send(msg, messageQueueSelector, null, new SendCallback() {
                                 @Override
                                 public void onSuccess(SendResult sendResult) {
+                                    successCount.incrementAndGet();
                                     countDownLatch.countDown();
                                     LOG.debug("send success msg:{}, result:{}", msg, sendResult);
                                 }
@@ -138,29 +139,32 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                                     LOG.debug("Send message async throws exception: {}", throwable);
                                     try {
                                         SendResult result = producer.send(msg, messageQueueSelector, null);//异步发送失败，会再同步发送一次
+                                        successCount.incrementAndGet();
                                         countDownLatch.countDown();
                                         LOG.debug("sync send success. SendResult: {}", result);
                                     } catch (Exception e) {
                                         LOG.error("sync sending message failed too. Mark this batch as failed");
-                                        hasError.set(true);
-                                        countDownLatch.countDown();
+                                        // Fail fast.
+                                        drainCountDownLatch(countDownLatch);
                                     }
                                 }
                             });
                         } catch (Exception e) {
-                            countDownLatch.countDown();
-                            hasError.set(true);
+                            // Fail fast.
+                            drainCountDownLatch(countDownLatch);
                             LOG.error("Send message failed.");
                         }
                     }
 
                     try {
-                        countDownLatch.await();
-                        if (!hasError.get()) {
+                        countDownLatch.await(Math.max(events.size(), MINIMUM_AWAIT_TIME_IN_SECONDS), TimeUnit.SECONDS);
+                        if (successCount.get() >= events.size()) {
                             tx.commit();
+                            LOG.debug("Transaction committed.");
                             return Status.READY;
                         } else {
                             tx.rollback();
+                            LOG.warn("Transaction rolls back.");
                             return Status.BACKOFF;
                         }
                     } catch (InterruptedException e) {
@@ -182,6 +186,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                         return Status.READY;
                     } catch (Exception e) {
                         tx.rollback();
+                        LOG.warn("Transaction rolled back");
                         return Status.BACKOFF;
                     }
                 }
@@ -196,6 +201,12 @@ public class RocketMQSink extends AbstractSink implements Configurable {
             return Status.BACKOFF;
         } finally {
             tx.close();
+        }
+    }
+
+    private void drainCountDownLatch(CountDownLatch countDownLatch) {
+        while (countDownLatch.getCount() > 0) {
+            countDownLatch.countDown();
         }
     }
 
