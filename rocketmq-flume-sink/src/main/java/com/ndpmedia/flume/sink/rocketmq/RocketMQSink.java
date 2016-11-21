@@ -1,10 +1,7 @@
 package com.ndpmedia.flume.sink.rocketmq;
 
 import com.alibaba.rocketmq.client.exception.MQClientException;
-import com.alibaba.rocketmq.client.producer.MQProducer;
-import com.alibaba.rocketmq.client.producer.MessageQueueSelector;
-import com.alibaba.rocketmq.client.producer.SendCallback;
-import com.alibaba.rocketmq.client.producer.SendResult;
+import com.alibaba.rocketmq.client.producer.*;
 import com.alibaba.rocketmq.client.producer.selector.Region;
 import com.alibaba.rocketmq.client.producer.selector.SelectMessageQueueByRegion;
 import com.alibaba.rocketmq.common.message.Message;
@@ -14,6 +11,7 @@ import org.apache.flume.Event;
 import org.apache.flume.EventDeliveryException;
 import org.apache.flume.Transaction;
 import org.apache.flume.conf.Configurable;
+import org.apache.flume.instrumentation.SinkCounter;
 import org.apache.flume.sink.AbstractSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +60,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
 
     private MessageQueueSelector messageQueueSelector;
 
+    private SinkCounter counter;
+
     @Override
     public void configure(Context context) {
         // 获取配置项
@@ -88,6 +88,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
         batchSize = context.getInteger(RocketMQSinkConstant.SEND_BATCH_SIZE, 128);
 
         messageQueueSelector = new SelectMessageQueueByRegion(Region.SAME);
+
+        counter = new SinkCounter(getName());
 
         if (LOG.isInfoEnabled()) {
             LOG.info("RocketMQSource configure success, topic={},tag={},allow={},deny={},extra={}, asyn={}", topic, tag, allow, deny, extra, asyn);
@@ -143,6 +145,8 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                                 public void onSuccess(SendResult sendResult) {
                                     successCount.incrementAndGet();
                                     countDownLatch.countDown();
+                                    counter.incrementEventDrainAttemptCount();
+                                    counter.incrementEventDrainSuccessCount();
                                     LOG.debug("send success msg:{}, result:{}", msg, sendResult);
                                 }
 
@@ -153,6 +157,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                                     try {
                                         SendResult result = producer.send(msg, messageQueueSelector, null);//异步发送失败，会再同步发送一次
                                         successCount.incrementAndGet();
+                                        counter.incrementEventDrainAttemptCount();
                                         countDownLatch.countDown();
                                         LOG.debug("sync send OK. SendResult: {}", result);
                                     } catch (Exception e) {
@@ -194,6 +199,10 @@ public class RocketMQSink extends AbstractSink implements Configurable {
                     try {
                         for (Event event : events) {
                             SendResult sendResult = producer.send(wrap(event), messageQueueSelector, null); //默认失败会重试
+                            counter.incrementEventDrainAttemptCount();
+                            if ( null!=sendResult && sendResult.getSendStatus() == SendStatus.SEND_OK ){
+                                counter.incrementEventDrainSuccessCount();
+                            }
                             LOG.debug("Send OK. SendResult: {}", sendResult);
                         }
                         tx.commit();
@@ -243,6 +252,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
         try {
             LOG.warn("RocketMQSink start producer... ");
             producer.start();
+            counter.start();
         } catch (MQClientException e) {
             LOG.error("RocketMQSink start producer failed", e);
         }
@@ -253,6 +263,7 @@ public class RocketMQSink extends AbstractSink implements Configurable {
     public synchronized void stop() {
         // 停止Producer
         producer.shutdown();
+        counter.stop();
         super.stop();
         LOG.warn("RocketMQSink stop producer... ");
     }
