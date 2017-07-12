@@ -8,7 +8,7 @@
 
 ==========================================================================================================
 ### Source配置及启动说明：
-#####config:
+##### config:
         - topic 指定mq topic, 必填
         - tag 指定mq tag名称, 选填, 默认 *
         - consumerGroup 指定mq consumerGroup, 选填,默认CG_ROCKETMQ_FLUME
@@ -20,9 +20,9 @@
         - consumeFromWhere 设置从何处开始消费,选填,支持["CONSUME_FROM_LAST_OFFSET"(默认),"CONSUME_FROM_FIRST_OFFSET","CONSUME_FROM_TIMESTAMP"]
         - consumeTimestamp 当consumeFromWhere=CONSUME_FROM_TIMESTAMP,指定时间戳,时间精度秒,时间格式"20131223171201",表示2013年12月23日17点12分01秒,选填,默认回溯到相对启动时间的半小时前(RocketMQ支持)
         - extra 可以指定一个extra字段,放入event的headers中,后续进行处理,选填
-#####other:
+##### other:
         - rocketmq msg中的properties内容，都会默认放到Flume Event的headers中，另外topic,tag,extra字段也在headers中
-#####config demo:
+##### config demo:
         agent_log.sources = source_rocketmq
         # Descrie the source
         agent_log.sources.source_rocketmq.type = com.ndpmedia.flume.source.rocketmq.RocketMQSource
@@ -36,13 +36,13 @@
         agent_log.sources.source_rocketmq.extra = aabbcc
         # Bind the source and sink to the channel
         agent_log.sources.source_rocketmq.channel = ch_mem
-#####启动命令：
+##### 启动命令：
         nohup flume-ng agent -c ./conf -f ./conf/rocketmq-fileroll.conf -n agent_log -Denable_ssl=true -Drocketmq.namesrv.domain=rocketmqNameSrv -Dlog.home=/flume-ng/logs -Dflume.root.logger=DEBUG,console &
 
 
-===========================================================================================================
+==============================================================================
 ### Sink  配置及启动说明：
-#####config：
+##### config：####
         - topic 指定mq topic, 必填
         - tag 指定mq tag名称, 选填, 默认*
         - producerGroup 指定 mq producerGroup, 选填,默认PG_ROCKETMQ_FLUME
@@ -51,9 +51,9 @@
         - deny 指定mq拒绝发送的过滤消息条件(正则表达式),选填,不填则全部允许
         - asyn 指定producer为同步发送还是异步发送,选填,默认true
         - extra 可以指定一个extra字段，放入msg的properties中，后续进行处理,选填,默认空
-#####other:
+##### other:
         - flume自带的source interceptor内容，都会默认放到RocketMQ.Message的properties中
-#####config demo:
+##### config demo:
         agent_log.sinks = sink_rocketmq
         # Descrie the sink
         agent_log.sinks.sink_rocketmq.type = com.ndpmedia.flume.sink.rocketmq.RocketMQSink
@@ -65,12 +65,12 @@
         agent_log.sinks.sink_rocketmq.extra = aabbcc
         # Bind the source and sink to the channel
         agent_log.sinks.sink_rocketmq.channel = ch_mem
-#####启动命令：
+##### 启动命令：
         nohup flume-ng agent -c ./conf -f ./conf/exec-rocketmq.conf -n agent_log -Denable_ssl=true -Drocketmq.namesrv.domain=rocketmqNameSrv -Dlog.home=/flume-ng/logs -Dflume.root.logger=DEBUG,console &
 
 
-===========================================================================================================
-#####需要拷贝到$FLUME_HOME/lib下的jar包含：
+===========================================================================
+##### 需要拷贝到$FLUME_HOME/lib下的jar包含：
         $PROJECT_HOME/rocketmq-flume-sink/target/rocketmq-flume-sink-1.0-SNAPSHOT.jar
         $PROJECT_HOME/rocketmq-flume-sink/target/dependency/fastjson-1.1.41.jar
         $PROJECT_HOME/rocketmq-flume-sink/target/dependency/netty-all-4.0.23.Final.jar
