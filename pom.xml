@@ -31,7 +31,7 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <flume.version>1.6.0</flume.version>
+        <flume.version>1.7.0</flume.version>
         <rocketmq.version>3.2.2.R2-SNAPSHOT</rocketmq.version>
         <junit.version>4.11</junit.version>
         <mockito.version>1.9.0</mockito.version>

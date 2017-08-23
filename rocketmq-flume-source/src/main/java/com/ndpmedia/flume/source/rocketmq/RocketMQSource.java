@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import static org.apache.flume.source.PollableSourceConstants.*;
 
 /**
  * RocketMQSource Created with rocketmq-flume.
@@ -54,6 +55,10 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private RocketMQSourceCounter counter;
 
+    private Long maxBackOffSleepInterval;
+
+    private Long backoffSleepIncrement;
+
     private AtomicReference<List<Event>> events = new AtomicReference<List<Event>>();
 
 
@@ -66,6 +71,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         maxDelay = context.getLong(RocketMQSourceConstant.MAX_DELAY, 2000L);
         String messageModel = context.getString(RocketMQSourceConstant.MESSAGE_MODEL, RocketMQSourceConstant.DEFAULT_MESSAGE_MODEL);
         String fromWhere = context.getString(RocketMQSourceConstant.CONSUME_FROM_WHERE, RocketMQSourceConstant.DEFAULT_CONSUME_FROM_WHERE);
+        backoffSleepIncrement = context.getLong(BACKOFF_SLEEP_INCREMENT, DEFAULT_BACKOFF_SLEEP_INCREMENT);
+        maxBackOffSleepInterval = context.getLong(MAX_BACKOFF_SLEEP, DEFAULT_MAX_BACKOFF_SLEEP);
 
         messageListener = new CustomMessageListenerConcurrently();
         consumer = RocketMQSourceUtil.getConsumerInstance(context);
@@ -111,6 +118,14 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             return Status.BACKOFF;
         }
         return Status.READY;
+    }
+
+    @Override public long getBackOffSleepIncrement() {
+        return backoffSleepIncrement;
+    }
+
+    @Override public long getMaxBackOffSleepInterval() {
+        return maxBackOffSleepInterval;
     }
 
     @Override public synchronized void start() {
