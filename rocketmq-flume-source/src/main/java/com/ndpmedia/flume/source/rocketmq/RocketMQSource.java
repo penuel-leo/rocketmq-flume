@@ -23,6 +23,8 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.apache.flume.source.PollableSourceConstants.*;
+
 /**
  * RocketMQSource Created with rocketmq-flume.
  *
@@ -48,6 +50,10 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private int pullBatchSize;
 
+    private Long maxBackOffSleepInterval;
+
+    private Long backoffSleepIncrement;
+
     @Override public void configure(Context context) {
         topic = context.getString(RocketMQSourceConstant.TOPIC, RocketMQSourceConstant.DEFAULT_TOPIC);
         tag = context.getString(RocketMQSourceConstant.TAG, RocketMQSourceConstant.DEFAULT_TAG);
@@ -55,6 +61,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         String messageModel = context.getString(RocketMQSourceConstant.MESSAGE_MODEL, RocketMQSourceConstant.DEFAULT_MESSAGE_MODEL);
         String fromWhere = context.getString(RocketMQSourceConstant.CONSUME_FROM_WHERE, RocketMQSourceConstant.DEFAULT_CONSUME_FROM_WHERE);
         pullBatchSize = context.getInteger(RocketMQSourceConstant.PULL_BATCH_SIZE, RocketMQSourceConstant.DEFAULT_PULL_BATCH_SIZE);
+        backoffSleepIncrement = context.getLong(BACKOFF_SLEEP_INCREMENT, DEFAULT_BACKOFF_SLEEP_INCREMENT);
+        maxBackOffSleepInterval = context.getLong(MAX_BACKOFF_SLEEP, DEFAULT_MAX_BACKOFF_SLEEP);
         consumer = RocketMQSourceUtil.getConsumerInstance(context);
 
         if ( null == counter ) {
@@ -176,6 +184,14 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
             return Status.BACKOFF;
         }
         return Status.READY;
+    }
+
+    @Override public long getBackOffSleepIncrement() {
+        return backoffSleepIncrement;
+    }
+
+    @Override public long getMaxBackOffSleepInterval() {
+        return maxBackOffSleepInterval;
     }
 
     @Override public synchronized void start() {
