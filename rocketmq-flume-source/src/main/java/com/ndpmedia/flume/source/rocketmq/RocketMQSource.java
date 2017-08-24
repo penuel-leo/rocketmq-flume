@@ -1,5 +1,6 @@
 package com.ndpmedia.flume.source.rocketmq;
 
+import com.alibaba.rocketmq.client.consumer.DefaultMQPullConsumer;
 import com.alibaba.rocketmq.client.consumer.MQPullConsumer;
 import com.alibaba.rocketmq.client.consumer.MessageQueueListener;
 import com.alibaba.rocketmq.client.consumer.PullResult;
@@ -40,7 +41,7 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
 
     private String tag;
 
-    private MQPullConsumer consumer;
+    private DefaultMQPullConsumer consumer;
 
     private String extra;
 
@@ -161,7 +162,8 @@ public class RocketMQSource extends AbstractSource implements Configurable, Poll
         counter.addToEventReceivedCount(eventSize);
 
         getChannelProcessor().processEventBatch(events);
-        consumer.updateConsumeOffset(messageQueue, offset);
+        consumer.getOffsetStore().updateOffset(messageQueue, offset, true);
+        LOG.debug("processEvent and updateRMQOffset true");
         events.clear();
 
         counter.addToEventAcceptedCount(eventSize);

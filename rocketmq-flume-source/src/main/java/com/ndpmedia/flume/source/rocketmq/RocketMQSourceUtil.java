@@ -19,7 +19,7 @@ import org.apache.flume.Context;
  */
 public class RocketMQSourceUtil {
 
-    public static MQPullConsumer getConsumerInstance(Context context) {
+    public static DefaultMQPullConsumer getConsumerInstance(Context context) {
         final String consumerGroup = context.getString(RocketMQSourceConstant.CONSUMER_GROUP, RocketMQSourceConstant.DEFAULT_CONSUMER_GROUP);
         System.out.println("----------consumerGroup is " + consumerGroup + " -----------");
 
